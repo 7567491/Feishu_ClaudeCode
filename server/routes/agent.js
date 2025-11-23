@@ -6,7 +6,7 @@ import { promises as fs } from 'fs';
 import crypto from 'crypto';
 import { apiKeysDb, githubTokensDb } from '../database/db.js';
 import { addProjectManually } from '../projects.js';
-import { queryClaudeSDK } from '../claude-sdk.js';
+import { queryClaude } from '../claude-cli.js';
 import { spawnCursor } from '../cursor-cli.js';
 import { Octokit } from '@octokit/rest';
 
@@ -905,9 +905,9 @@ router.post('/', validateExternalApiKey, async (req, res) => {
 
     // Start the appropriate session
     if (provider === 'claude') {
-      console.log('🤖 Starting Claude SDK session');
+      console.log('🤖 Starting Claude CLI session');
 
-      await queryClaudeSDK(message.trim(), {
+      await queryClaude(message.trim(), {
         projectPath: finalProjectPath,
         cwd: finalProjectPath,
         sessionId: null, // New session

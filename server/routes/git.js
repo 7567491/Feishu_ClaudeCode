@@ -4,7 +4,7 @@ import { promisify } from 'util';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { extractProjectDirectory } from '../projects.js';
-import { queryClaudeSDK } from '../claude-sdk.js';
+import { queryClaude } from '../claude-cli.js';
 import { spawnCursor } from '../cursor-cli.js';
 
 const router = express.Router();
@@ -648,7 +648,7 @@ Generate the commit message:`;
 
     // Call the appropriate agent
     if (provider === 'claude') {
-      await queryClaudeSDK(prompt, {
+      await queryClaude(prompt, {
         cwd: projectPath,
         permissionMode: 'bypassPermissions',
         model: 'sonnet'

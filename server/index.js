@@ -58,7 +58,7 @@ import fetch from 'node-fetch';
 import mime from 'mime-types';
 
 import { getProjects, getSessions, getSessionMessages, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
-import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions } from './claude-sdk.js';
+import { queryClaude, abortClaudeSession, isClaudeSessionActive, getActiveClaudeSessions } from './claude-cli.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
 import gitRoutes from './routes/git.js';
 import authRoutes from './routes/auth.js';
@@ -718,8 +718,8 @@ function handleChatConnection(ws) {
                 console.log('📁 Project:', data.options?.projectPath || 'Unknown');
                 console.log('🔄 Session:', data.options?.sessionId ? 'Resume' : 'New');
 
-                // Use Claude Agents SDK
-                await queryClaudeSDK(data.command, data.options, ws);
+                // Use Claude CLI
+                await queryClaude(data.command, data.options, ws);
             } else if (data.type === 'cursor-command') {
                 console.log('[DEBUG] Cursor message:', data.command || '[Continue/Resume]');
                 console.log('📁 Project:', data.options?.cwd || 'Unknown');
@@ -742,8 +742,8 @@ function handleChatConnection(ws) {
                 if (provider === 'cursor') {
                     success = abortCursorSession(data.sessionId);
                 } else {
-                    // Use Claude Agents SDK
-                    success = await abortClaudeSDKSession(data.sessionId);
+                    // Use Claude CLI
+                    success = await abortClaudeSession(data.sessionId);
                 }
 
                 ws.send(JSON.stringify({
@@ -770,8 +770,8 @@ function handleChatConnection(ws) {
                 if (provider === 'cursor') {
                     isActive = isCursorSessionActive(sessionId);
                 } else {
-                    // Use Claude Agents SDK
-                    isActive = isClaudeSDKSessionActive(sessionId);
+                    // Use Claude CLI
+                    isActive = isClaudeSessionActive(sessionId);
                 }
 
                 ws.send(JSON.stringify({
@@ -783,7 +783,7 @@ function handleChatConnection(ws) {
             } else if (data.type === 'get-active-sessions') {
                 // Get all currently active sessions
                 const activeSessions = {
-                    claude: getActiveClaudeSDKSessions(),
+                    claude: getActiveClaudeSessions(),
                     cursor: getActiveCursorSessions()
                 };
                 ws.send(JSON.stringify({
@@ -1538,7 +1538,7 @@ async function startServer() {
         const isProduction = fs.existsSync(distIndexPath);
 
         // Log Claude implementation mode
-        console.log(`${c.info('[INFO]')} Using Claude Agents SDK for Claude integration`);
+        console.log(`${c.info('[INFO]')} Using Claude CLI for Claude integration`);
         console.log(`${c.info('[INFO]')} Running in ${c.bright(isProduction ? 'PRODUCTION' : 'DEVELOPMENT')} mode`);
 
         if (!isProduction) {

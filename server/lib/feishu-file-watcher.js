@@ -19,6 +19,7 @@ export class FeishuFileWatcher {
 
     // Options
     this.enabled = options.enabled !== false; // Default enabled
+    this.sendAsDocument = options.sendAsDocument !== false; // Default: send as document
     this.debounceDelay = options.debounceDelay || 3000; // 3 seconds
     this.ignorePaths = options.ignorePaths || [
       '**/node_modules/**',
@@ -39,6 +40,7 @@ export class FeishuFileWatcher {
     console.log('[FileWatcher] Initialized');
     console.log('[FileWatcher] Watch path:', this.watchPath);
     console.log('[FileWatcher] Enabled:', this.enabled);
+    console.log('[FileWatcher] Send as document:', this.sendAsDocument);
   }
 
   /**
@@ -159,7 +161,7 @@ export class FeishuFileWatcher {
   }
 
   /**
-   * Send file to active chat
+   * Send file to active chat (as file attachment or as Feishu document)
    */
   async sendFile(fullPath, relativePath, changeType) {
     if (!this.client || !this.activeChatId) {
@@ -180,16 +182,14 @@ export class FeishuFileWatcher {
       const stats = fs.statSync(fullPath);
       const sizeKB = (stats.size / 1024).toFixed(2);
 
-      // Send notification message
-      const emoji = changeType === 'created' ? '📝' : '✏️';
-      const action = changeType === 'created' ? '新建' : '修改';
-      await this.client.sendTextMessage(
-        this.activeChatId,
-        `${emoji} 检测到文件${action}: ${relativePath} (${sizeKB}KB)\n正在自动发送...`
-      );
-
-      // Send the file
-      await this.client.sendFile(this.activeChatId, fullPath);
+      // Determine send method
+      if (this.sendAsDocument) {
+        // Send as Feishu document
+        await this.sendAsFeishuDocument(fullPath, relativePath, changeType, sizeKB);
+      } else {
+        // Send as file attachment
+        await this.sendAsFileAttachment(fullPath, relativePath, changeType, sizeKB);
+      }
 
       // Mark as recently sent
       const fileKey = `${fullPath}:${changeType}`;
@@ -216,11 +216,70 @@ export class FeishuFileWatcher {
   }
 
   /**
+   * Send file as Feishu document (create document from markdown)
+   */
+  async sendAsFeishuDocument(fullPath, relativePath, changeType, sizeKB) {
+    try {
+      // Send notification message
+      const emoji = changeType === 'created' ? '📝' : '✏️';
+      const action = changeType === 'created' ? '新建' : '修改';
+      await this.client.sendTextMessage(
+        this.activeChatId,
+        `${emoji} 检测到文件${action}: ${relativePath} (${sizeKB}KB)\n正在创建飞书文档...`
+      );
+
+      // Read file content
+      const content = fs.readFileSync(fullPath, 'utf-8');
+
+      // Get document title from filename (remove .md extension)
+      const title = path.basename(relativePath, '.md');
+
+      // Create Feishu document from markdown
+      console.log('[FileWatcher] Creating Feishu document:', title);
+      const doc = await this.client.createDocumentFromMarkdown(title, content);
+
+      // Send document link
+      await this.client.sendDocumentLink(this.activeChatId, doc.document_id, title);
+
+      console.log('[FileWatcher] Document created and link sent:', doc.url);
+
+    } catch (error) {
+      console.error('[FileWatcher] Failed to create document:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Send file as file attachment (original behavior)
+   */
+  async sendAsFileAttachment(fullPath, relativePath, changeType, sizeKB) {
+    try {
+      // Send notification message
+      const emoji = changeType === 'created' ? '📝' : '✏️';
+      const action = changeType === 'created' ? '新建' : '修改';
+      await this.client.sendTextMessage(
+        this.activeChatId,
+        `${emoji} 检测到文件${action}: ${relativePath} (${sizeKB}KB)\n正在自动发送...`
+      );
+
+      // Send the file
+      await this.client.sendFile(this.activeChatId, fullPath);
+
+      console.log('[FileWatcher] File attachment sent');
+
+    } catch (error) {
+      console.error('[FileWatcher] Failed to send file attachment:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Get watcher status
    */
   getStatus() {
     return {
       enabled: this.enabled,
+      sendAsDocument: this.sendAsDocument,
       isRunning: this.isRunning,
       watchPath: this.watchPath,
       activeChatId: this.activeChatId,

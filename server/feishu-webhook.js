@@ -20,6 +20,10 @@ let feishuClient = null; // FeishuClient for file operations
 let sessionManager = null;
 let userId = null;
 let botOpenId = null; // Bot's own open_id for mention checking
+const processedMessages = new Map(); // messageId -> timestamp
+const recentFileRequests = new Map(); // chatId|file -> timestamp
+const MESSAGE_TTL_MS = 10 * 60 * 1000; // 10分钟内相同消息不重复处理
+const FILE_COOLDOWN_MS = 5 * 60 * 1000; // 5分钟内相同聊天同一文件不重复转化
 
 /**
  * Get user's display name with fallback strategy:
@@ -155,6 +159,26 @@ export async function initializeFeishuWebhook() {
 async function handleMessageEvent(data) {
   try {
     const event = data.event || data;
+    const messageId = event.message?.message_id;
+    const chatId = event.message?.chat_id;
+    const now = Date.now();
+
+    if (messageId) {
+      const lastHandled = processedMessages.get(messageId);
+      if (lastHandled && now - lastHandled < MESSAGE_TTL_MS) {
+        console.log('[FeishuWebhook] Duplicate message detected, skipping:', messageId);
+        return;
+      }
+      processedMessages.set(messageId, now);
+      // 简单清理过期记录，避免内存累积
+      if (processedMessages.size > 500) {
+        for (const [id, ts] of processedMessages) {
+          if (now - ts > MESSAGE_TTL_MS) {
+            processedMessages.delete(id);
+          }
+        }
+      }
+    }
 
     console.log('[FeishuWebhook] Received message:');
     console.log('  Message ID:', event.message?.message_id);
@@ -169,7 +193,7 @@ async function handleMessageEvent(data) {
 
     // Check if message is for bot
     const chatType = event.message?.chat_type;
-    const chatId = event.message?.chat_id;
+    // chatId 已在上方提取
 
     // 🆕 Cache group members if this is a group chat
     if (chatType === 'group' && chatId) {
@@ -366,22 +390,50 @@ async function handleMessageEvent(data) {
       event.message?.message_id
     );
 
+    // Check if this is a markdown convert command
+    const convertCommand = FeishuFileHandler.parseConvertCommand(userText);
+    if (convertCommand && convertCommand.command === 'convert') {
+      console.log('[FeishuWebhook] File convert command detected:', convertCommand.fileName);
+      if (chatId) {
+        const key = `${chatId}|${convertCommand.fileName}`;
+        const lastTime = recentFileRequests.get(key);
+        if (lastTime && now - lastTime < FILE_COOLDOWN_MS) {
+          console.log('[FeishuWebhook] Recent identical convert request, skipping:', key);
+          await sendMessage(chatId, '⏳ 该文件刚处理过，请稍后再试');
+          return;
+        }
+        recentFileRequests.set(key, now);
+      }
+
+      try {
+        await FeishuFileHandler.handleFileConvert(
+          feishuClient,
+          chatId,
+          session.project_path,
+          convertCommand.fileName
+        );
+        feishuDb.logMessage(session.id, 'outgoing', 'file', `convert:${convertCommand.fileName}`, null);
+        feishuDb.updateSessionActivity(session.id);
+        return;
+      } catch (error) {
+        console.error('[FeishuWebhook] Failed to convert file:', error.message);
+        await sendMessage(chatId, `❌ 转化失败: ${error.message}`);
+        return;
+      }
+    }
+
     // Check if this is a file send command
     const fileCommand = FeishuFileHandler.parseFileCommand(userText);
     if (fileCommand && fileCommand.command === 'send') {
       console.log('[FeishuWebhook] File send command detected:', fileCommand.fileName);
 
       try {
-        await sendMessage(chatId, `📤 正在发送文件: ${fileCommand.fileName}...`);
-
         await FeishuFileHandler.handleFileSend(
           feishuClient,
           chatId,
           session.project_path,
           fileCommand.fileName
         );
-
-        await sendMessage(chatId, `✅ 文件已发送: ${fileCommand.fileName}`);
 
         // Log success
         feishuDb.logMessage(session.id, 'outgoing', 'file', fileCommand.fileName, null);

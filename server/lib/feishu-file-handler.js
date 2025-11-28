@@ -52,6 +52,23 @@ export class FeishuFileHandler {
   }
 
   /**
+   * Check if message is a markdown convert command
+   * 仅当以“转化”开头且文件为 .md
+   * @param {string} userText
+   * @returns {Object|null} - { command: 'convert', fileName: 'xxx.md' } or null
+   */
+  static parseConvertCommand(userText) {
+    const text = userText.trim();
+    if (!/^转化/i.test(text)) return null;
+
+    const match = text.match(/^转化\s*([^\s]+\.(md))/i);
+    if (match) {
+      return { command: 'convert', fileName: this.cleanFileName(match[1]) };
+    }
+    return null;
+  }
+
+  /**
    * Find file in project directory
    * @param {string} projectPath - Project root path
    * @param {string} fileName - File name to find
@@ -132,6 +149,29 @@ export class FeishuFileHandler {
     }
 
     return null;
+  }
+
+  /**
+   * Convert markdown file to Feishu doc and send link
+   */
+  static async handleFileConvert(client, chatId, projectPath, fileName) {
+    console.log('[FileHandler] Handling file convert:', fileName);
+
+    const filePath = this.findFile(projectPath, fileName);
+    if (!filePath) {
+      throw new Error(`文件未找到: ${fileName}`);
+    }
+
+    console.log('[FileHandler] Found file at:', filePath);
+
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const title = path.basename(filePath, path.extname(filePath));
+
+    const doc = await client.createDocumentFromMarkdown(title, content);
+    await client.sendDocumentLink(chatId, doc.document_id, title);
+
+    console.log('[FileHandler] File converted and link sent:', fileName);
+    return doc;
   }
 
   /**

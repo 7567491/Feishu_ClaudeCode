@@ -152,6 +152,34 @@ tail -f /home/ccp/teacher/feishu_bot.log
 
 **feicc/ 目录：** 由主应用动态管理，每个飞书对话自动创建独立工作目录和 Git 仓库。路径硬编码在 `server/lib/feishu-session.js`，迁移项目时必须一起移动。
 
+## 🔐 Git 管理规则
+
+**重要：本项目只维护一个 Git 仓库**
+
+- ✅ **唯一仓库位置：** `/home/ccp/.git`
+- ❌ **禁止子目录建 Git：** `/home/ccp` 下的所有子目录（包括 `feicc/`、`server/`、`docs/` 等）不应创建独立的 Git 仓库
+- 📤 **推送规则：** 所有代码提交和推送只能通过根目录的 Git 仓库进行
+
+**GitHub 配置：**
+```bash
+# 远程仓库
+Repository: https://github.com/7567491/Feishu_ClaudeCode.git
+
+# 认证方式
+使用系统环境变量 Github_Token 进行认证
+export Github_Token=github_pat_xxxxx
+
+# 提交示例
+git add .
+git commit -m "feat: 你的提交信息"
+git push origin main
+```
+
+**注意事项：**
+- 如果发现子目录中有 `.git` 文件或目录，应立即删除
+- 所有代码变更必须在 `/home/ccp` 目录下进行版本控制
+- `feicc/` 目录下的用户会话工作区不应包含独立的 Git 仓库
+
 ## 🔄 自动化维护
 
 **定时清理：** Cron 每天 3:00 执行 `scripts/cleanup-temp-files.sh`

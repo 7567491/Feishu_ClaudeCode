@@ -73,6 +73,7 @@ import projectsRoutes from './routes/projects.js';
 import cliAuthRoutes from './routes/cli-auth.js';
 import userRoutes from './routes/user.js';
 import feishuRoutes from './routes/feishu.js';
+import feishuProxyRoutes from './routes/feishu-proxy.js';
 import { initializeDatabase } from './database/db.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { initializeFeishuWebhook, createWebhookHandler } from './feishu-webhook.js';
@@ -323,6 +324,9 @@ app.use('/api/user', authenticateToken, userRoutes);
 
 // Feishu API Routes (protected)
 app.use('/api/feishu', authenticateToken, feishuRoutes);
+
+// Feishu Proxy API (public - for bot-to-bot communication, optional API key auth)
+app.use('/api/feishu-proxy', feishuProxyRoutes);
 
 // Feishu Webhook (public - no authentication, verified by Feishu signature)
 app.post('/webhook', createWebhookHandler());

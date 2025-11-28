@@ -100,6 +100,14 @@ export class FeishuClient {
       console.log('  Chat ID:', event.message?.chat_id);
       console.log('  Chat Type:', event.message?.chat_type);
       console.log('  Sender:', event.sender?.sender_id?.open_id);
+      console.log('  Sender Type:', event.sender?.sender_type); // 新增：打印发送者类型
+      console.log('  Sender ID Type:', event.sender?.sender_id?.id_type); // 新增：打印ID类型
+
+      // 如果是机器人发送的消息，也打印出来（便于调试）
+      if (event.sender?.sender_type === 'app') {
+        console.log('  ⚠️  Message from BOT/APP detected');
+        console.log('  Mentions:', JSON.stringify(event.message?.mentions, null, 2));
+      }
 
       // Check if this message is for the bot
       if (!this.isMessageForBot(event)) {
@@ -155,21 +163,28 @@ export class FeishuClient {
    * Check if a message is for the bot
    * Returns true for:
    * - Private chats (chat_type === 'p2p')
-   * - Group chats where bot is mentioned
+   * - Group chats where bot is mentioned (不区分发送者是用户还是机器人)
    */
   isMessageForBot(event) {
     const message = event.message;
-    if (!message) return false;
+    if (!message) {
+      console.log('[FeishuClient] isMessageForBot: No message object, returning false');
+      return false;
+    }
 
     // Private chat - always for bot
     if (message.chat_type === 'p2p') {
+      console.log('[FeishuClient] isMessageForBot: Private chat, returning true');
       return true;
     }
 
     // Group chat - check for mentions
     if (message.chat_type === 'group') {
       const mentions = message.mentions;
+      console.log('[FeishuClient] isMessageForBot: Group chat, mentions:', mentions?.length || 0);
+
       if (!mentions || mentions.length === 0) {
+        console.log('[FeishuClient] isMessageForBot: No mentions, returning false');
         return false;
       }
 
@@ -177,22 +192,28 @@ export class FeishuClient {
       // If we have bot's open_id, check for exact match
       // Otherwise, accept any @ mention as potentially for us
       if (this.botInfo?.open_id) {
+        console.log('[FeishuClient] isMessageForBot: Bot open_id exists, checking mentions...');
         for (const mention of mentions) {
           if (mention.id?.open_id === this.botInfo.open_id) {
+            console.log('[FeishuClient] isMessageForBot: Bot is mentioned, returning true');
             return true;
           }
           if (mention.key === '@_all') {
+            console.log('[FeishuClient] isMessageForBot: @_all detected, returning true');
             return true;
           }
         }
+        console.log('[FeishuClient] isMessageForBot: Bot not mentioned, returning false');
         return false;
       } else {
-        // No bot info - accept any mention
+        // No bot info - accept any mention (包括来自机器人的@消息)
+        console.log('[FeishuClient] isMessageForBot: No bot open_id, accepting any mention, returning true');
         return true;
       }
     }
 
     // Unknown chat type
+    console.log('[FeishuClient] isMessageForBot: Unknown chat type:', message.chat_type);
     return false;
   }
 
@@ -951,6 +972,111 @@ export class FeishuClient {
     } catch (error) {
       console.error('[FeishuClient] Failed to create document from markdown with permission:', error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Get all members in a chat/group
+   * @param {string} chatId - Chat ID (e.g., oc_xxx)
+   * @returns {Promise<Array>} Array of member objects with open_id, name, etc.
+   */
+  async getChatMembers(chatId) {
+    try {
+      console.log('[FeishuClient] Getting members for chat:', chatId);
+
+      const members = [];
+      let pageToken = null;
+      let hasMore = true;
+
+      // Paginate through all members
+      while (hasMore) {
+        const params = {
+          member_id_type: 'open_id',
+          page_size: 100
+        };
+
+        if (pageToken) {
+          params.page_token = pageToken;
+        }
+
+        const res = await this.client.im.chatMembers.get({
+          path: {
+            chat_id: chatId
+          },
+          params
+        });
+
+        if (res.code === 0) {
+          const items = res.data?.items || [];
+          console.log(`[FeishuClient] Got ${items.length} members in this page`);
+
+          // Extract member info
+          for (const item of items) {
+            const member = {
+              open_id: item.member_id,
+              name: item.name || null,
+              tenant_key: item.tenant_key || null
+            };
+            members.push(member);
+          }
+
+          hasMore = res.data?.has_more || false;
+          pageToken = res.data?.page_token || null;
+
+        } else {
+          throw new Error(`Failed to get chat members: ${res.code} - ${res.msg}`);
+        }
+      }
+
+      console.log(`[FeishuClient] Total members found: ${members.length}`);
+      return members;
+
+    } catch (error) {
+      console.error('[FeishuClient] Failed to get chat members:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user info by open_id
+   * Note: This only works for users in the same tenant as the app
+   * @param {string} openId - User's open_id
+   * @returns {Promise<Object|null>} User info object or null if failed
+   */
+  async getUserInfo(openId) {
+    try {
+      console.log('[FeishuClient] Getting user info for:', openId);
+
+      const res = await this.client.contact.user.get({
+        path: {
+          user_id: openId
+        },
+        params: {
+          user_id_type: 'open_id'
+        }
+      });
+
+      if (res.code === 0) {
+        const user = res.data?.user;
+        console.log('[FeishuClient] Got user info:', user?.name);
+        return {
+          open_id: openId,
+          name: user?.name,
+          nickname: user?.nickname,
+          en_name: user?.en_name,
+          tenant_key: user?.tenant_key
+        };
+      } else if (res.code === 99991663 || res.code === 99991400) {
+        // User not found or no permission (cross-tenant user)
+        console.log('[FeishuClient] User not accessible (possibly cross-tenant):', openId);
+        return null;
+      } else {
+        throw new Error(`Failed to get user info: ${res.code} - ${res.msg}`);
+      }
+
+    } catch (error) {
+      console.error('[FeishuClient] Failed to get user info:', error.message);
+      return null;
     }
   }
 }

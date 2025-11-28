@@ -371,7 +371,7 @@ const feishuDb = {
         (conversation_id, feishu_id, session_type, project_path, claude_session_id, user_id)
         VALUES (?, ?, ?, ?, ?, ?)
       `);
-      const result = stmt.run(conversationId, feishuId, sessionType, projectPath, userId, claudeSessionId);
+      const result = stmt.run(conversationId, feishuId, sessionType, projectPath, claudeSessionId, userId);
       return {
         id: result.lastInsertRowid,
         conversation_id: conversationId,
@@ -494,6 +494,93 @@ const feishuDb = {
       }
 
       const row = db.prepare(query).get(...params);
+      return row;
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  // Store or update group member information
+  upsertGroupMember: (chatId, memberOpenId, memberInfo = {}) => {
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO feishu_group_members
+        (chat_id, member_open_id, member_user_id, member_name, member_type, tenant_key, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(chat_id, member_open_id)
+        DO UPDATE SET
+          member_user_id = excluded.member_user_id,
+          member_name = excluded.member_name,
+          member_type = excluded.member_type,
+          tenant_key = excluded.tenant_key,
+          updated_at = CURRENT_TIMESTAMP
+      `);
+
+      const result = stmt.run(
+        chatId,
+        memberOpenId,
+        memberInfo.member_user_id || null,
+        memberInfo.member_name || null,
+        memberInfo.member_type || 'user',
+        memberInfo.tenant_key || null
+      );
+
+      return { success: true, changes: result.changes };
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  // Get all members of a group chat
+  getGroupMembers: (chatId) => {
+    try {
+      const rows = db.prepare(`
+        SELECT * FROM feishu_group_members
+        WHERE chat_id = ?
+        ORDER BY created_at ASC
+      `).all(chatId);
+      return rows;
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  // Get member info by open_id
+  getMemberByOpenId: (memberOpenId) => {
+    try {
+      const row = db.prepare(`
+        SELECT * FROM feishu_group_members
+        WHERE member_open_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `).get(memberOpenId);
+      return row;
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  // Delete all members of a group (e.g., when refreshing)
+  deleteGroupMembers: (chatId) => {
+    try {
+      const result = db.prepare('DELETE FROM feishu_group_members WHERE chat_id = ?').run(chatId);
+      return result.changes;
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  // Get statistics of group members
+  getGroupMemberStats: (chatId) => {
+    try {
+      const row = db.prepare(`
+        SELECT
+          COUNT(*) as total_members,
+          SUM(CASE WHEN member_type = 'user' THEN 1 ELSE 0 END) as user_count,
+          SUM(CASE WHEN member_type = 'app' THEN 1 ELSE 0 END) as bot_count
+        FROM feishu_group_members
+        WHERE chat_id = ?
+      `).get(chatId);
       return row;
     } catch (err) {
       throw err;

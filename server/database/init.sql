@@ -85,3 +85,20 @@ CREATE TABLE IF NOT EXISTS feishu_message_log (
 
 CREATE INDEX IF NOT EXISTS idx_feishu_message_log_session_id ON feishu_message_log(session_id);
 CREATE INDEX IF NOT EXISTS idx_feishu_message_log_created_at ON feishu_message_log(created_at);
+-- Feishu group members table for tracking group chat members
+CREATE TABLE IF NOT EXISTS feishu_group_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL, -- Group chat ID (oc_xxx)
+    member_open_id TEXT NOT NULL, -- Member's open_id (ou_xxx)
+    member_user_id TEXT, -- Member's user_id if available
+    member_name TEXT, -- Member's display name
+    member_type TEXT, -- 'user' or 'app' (bot)
+    tenant_key TEXT, -- Tenant key for cross-tenant identification
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(chat_id, member_open_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_feishu_group_members_chat_id ON feishu_group_members(chat_id);
+CREATE INDEX IF NOT EXISTS idx_feishu_group_members_open_id ON feishu_group_members(member_open_id);
+CREATE INDEX IF NOT EXISTS idx_feishu_group_members_user_id ON feishu_group_members(member_user_id);

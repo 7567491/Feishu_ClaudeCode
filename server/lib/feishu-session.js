@@ -16,10 +16,14 @@ import { spawn } from 'child_process';
 import path from 'path';
 
 export class FeishuSessionManager {
-  constructor(userId, baseDir = './feicc') {
+  constructor(userId, baseDir = './feicc', userNickname = null) {
     this.userId = userId; // User ID for database operations
     this.baseDir = baseDir; // Base directory for Feishu projects
+    this.userNickname = userNickname; // User nickname for directory prefix
     console.log('[SessionManager] Initialized with base dir:', this.baseDir);
+    if (userNickname) {
+      console.log('[SessionManager] User nickname:', userNickname);
+    }
   }
 
   /**
@@ -108,8 +112,10 @@ export class FeishuSessionManager {
    * 2. Initialize git repository
    * 3. Register project with addProjectManually()
    * 4. Create session in database
+   * @param {Object} event - Feishu event
+   * @param {string} [userNickname] - Optional user nickname for directory prefix
    */
-  async getOrCreateSession(event) {
+  async getOrCreateSession(event, userNickname = null) {
     const conversationId = this.getConversationId(event);
     const feishuId = this.getFeishuId(event);
     const sessionType = this.getSessionType(event);
@@ -147,8 +153,10 @@ export class FeishuSessionManager {
     // Session doesn't exist - create new one
     console.log('[SessionManager] Creating new session for:', conversationId);
 
-    // Create project directory path
-    const projectPath = path.join(this.baseDir, conversationId);
+    // Create project directory path (conversation directories don't use nickname prefix)
+    // Only new user-created project directories should use nickname prefix
+    const directoryName = conversationId;
+    const projectPath = path.join(this.baseDir, directoryName);
     const absolutePath = path.resolve(projectPath);
 
     // Create directory if it doesn't exist
@@ -170,6 +178,15 @@ export class FeishuSessionManager {
     }
 
     // Create session in database
+    console.log('[SessionManager] Creating session with params:', {
+      conversationId,
+      feishuId,
+      sessionType,
+      absolutePath,
+      userId: this.userId,
+      claudeSessionId: null
+    });
+
     session = feishuDb.createSession(
       conversationId,
       feishuId,

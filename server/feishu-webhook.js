@@ -10,6 +10,7 @@ import { FeishuClient } from './lib/feishu-client.js';
 import { FeishuSessionManager } from './lib/feishu-session.js';
 import { FeishuMessageWriter } from './lib/feishu-message-writer.js';
 import { FeishuFileHandler } from './lib/feishu-file-handler.js';
+import { GroupMemberCollector } from './lib/group-member-collector.js';
 import { queryClaude } from './claude-cli.js';
 import { credentialsDb, userDb, feishuDb, initializeDatabase } from './database/db.js';
 
@@ -18,6 +19,64 @@ let client = null; // Lark client for basic API calls
 let feishuClient = null; // FeishuClient for file operations
 let sessionManager = null;
 let userId = null;
+let botOpenId = null; // Bot's own open_id for mention checking
+
+/**
+ * Get user's display name with fallback strategy:
+ * 1. Try to get from group members cache (works for cross-tenant users)
+ * 2. Try to get from Feishu API (only works for same-tenant users)
+ * 3. Use union_id to generate identifier
+ * 4. Use default "User"
+ */
+async function getUserDisplayName(openId, unionId = null, chatId = null) {
+  try {
+    console.log(`[getUserDisplayName] Trying to get display name for openId: ${openId}, chatId: ${chatId}, unionId: ${unionId}`);
+
+    // Strategy 1: Check group members cache (fastest, works for cross-tenant)
+    if (chatId) {
+      const cachedMember = feishuDb.getMemberByOpenId(openId);
+      if (cachedMember && cachedMember.member_name) {
+        console.log(`[getUserDisplayName] ✅ Found in cache: ${cachedMember.member_name} (tenant: ${cachedMember.tenant_key})`);
+        return cachedMember.member_name;
+      } else {
+        console.log(`[getUserDisplayName] ❌ Not found in cache for openId: ${openId}`);
+      }
+    }
+
+    // Strategy 2: Try Feishu API (only works for same-tenant users)
+    try {
+      const userInfo = await feishuClient.getUserInfo(openId);
+      if (userInfo && userInfo.name) {
+        console.log(`[getUserDisplayName] ✅ Got from API: ${userInfo.name}`);
+        // Cache the name for future use
+        if (chatId) {
+          feishuDb.upsertGroupMember(chatId, openId, {
+            member_name: userInfo.name,
+            tenant_key: userInfo.tenant_key || null
+          });
+        }
+        return userInfo.name;
+      }
+    } catch (apiError) {
+      console.log(`[getUserDisplayName] ⚠️  API failed (likely cross-tenant user): ${apiError.message}`);
+    }
+
+    // Strategy 3: Use union_id to generate identifier
+    if (unionId) {
+      const displayName = `User_${unionId.substring(3, 11).toUpperCase()}`;
+      console.log(`[getUserDisplayName] ⚠️  Generated from union_id: ${displayName}`);
+      return displayName;
+    }
+
+    // Strategy 4: Default fallback
+    console.log(`[getUserDisplayName] ⚠️  Using default: User`);
+    return 'User';
+
+  } catch (error) {
+    console.error('[getUserDisplayName] Error:', error.message);
+    return 'User';
+  }
+}
 
 /**
  * Initialize Feishu Webhook handler
@@ -67,6 +126,26 @@ export async function initializeFeishuWebhook() {
   // Create session manager
   sessionManager = new FeishuSessionManager(userId, './feicc');
 
+  // Try to get bot info (bot's own open_id)
+  try {
+    // Method 1: Get from tenant access token endpoint
+    const botInfo = await client.auth.tenantAccessToken.internal({
+      data: { app_id: appId, app_secret: appSecret }
+    });
+
+    // The bot's app_id can be used, but we need the bot's open_id
+    // Unfortunately, there's no direct API to get bot's open_id
+    // So we'll use the app_id as a fallback identifier
+    console.log('[FeishuWebhook] Bot App ID:', appId);
+
+    // Store app_id for comparison (some mention events use app_id)
+    botOpenId = appId;
+  } catch (error) {
+    console.warn('[FeishuWebhook] Could not get bot info:', error.message);
+    console.warn('[FeishuWebhook] Will accept any @mention in groups');
+    botOpenId = null;
+  }
+
   console.log('[FeishuWebhook] Initialized successfully');
 }
 
@@ -82,15 +161,104 @@ async function handleMessageEvent(data) {
     console.log('  Chat ID:', event.message?.chat_id);
     console.log('  Chat Type:', event.message?.chat_type);
     console.log('  Sender:', event.sender?.sender_id?.open_id);
+    console.log('  Sender Type:', event.sender?.sender_type); // user or app
+
+    // 🆕 收集发送者和被提及用户的信息
+    await GroupMemberCollector.collectFromMessageEvent(event);
+    await GroupMemberCollector.collectFromMentions(event);
 
     // Check if message is for bot
     const chatType = event.message?.chat_type;
+    const chatId = event.message?.chat_id;
+
+    // 🆕 Cache group members if this is a group chat
+    if (chatType === 'group' && chatId) {
+      try {
+        // Check if we already have cached members for this group
+        const cachedMembers = feishuDb.getGroupMembers(chatId);
+        const cacheAge = cachedMembers.length > 0
+          ? (Date.now() - new Date(cachedMembers[0].updated_at).getTime()) / 1000
+          : Infinity;
+
+        // Refresh cache if older than 1 hour or empty
+        if (cacheAge > 3600 || cachedMembers.length === 0) {
+          console.log(`[FeishuWebhook] Refreshing group members cache for ${chatId}...`);
+          const members = await feishuClient.getChatMembers(chatId);
+
+          // Store members in database
+          for (const member of members) {
+            feishuDb.upsertGroupMember(chatId, member.open_id, {
+              member_name: member.name,
+              member_type: member.member_type || 'user',
+              tenant_key: member.tenant_key
+            });
+          }
+
+          console.log(`[FeishuWebhook] Cached ${members.length} members for group ${chatId}`);
+        } else {
+          console.log(`[FeishuWebhook] Using cached group members (${cachedMembers.length} members, age: ${Math.round(cacheAge)}s)`);
+        }
+      } catch (error) {
+        console.error('[FeishuWebhook] Failed to cache group members:', error.message);
+        // Continue processing message even if caching fails
+      }
+    }
+
     if (chatType === 'group') {
       const mentions = event.message?.mentions || [];
+      console.log('  Mentions count:', mentions.length);
+      console.log('  Mentions details:', JSON.stringify(mentions, null, 2));
+
       if (mentions.length === 0) {
         console.log('[FeishuWebhook] Group message without mention, skipping');
         return;
       }
+
+      // 🔧 Fix: Check if THIS bot was mentioned (not just any bot)
+      // In multi-bot groups, only respond when explicitly mentioned
+      let isMentioned = false;
+
+      for (const mention of mentions) {
+        console.log('  Checking mention:', JSON.stringify(mention, null, 2));
+
+        // Check multiple fields to determine if this bot was mentioned
+        // Method 1: Check if mention key contains bot name (从配置或环境变量读取)
+        const botName = process.env.FeishuCC_Bot_Name || '小六'; // 可配置机器人名称
+        if (mention.key && mention.key.includes(botName)) {
+          console.log(`  ✅ Bot "${botName}" was mentioned via key`);
+          isMentioned = true;
+          break;
+        }
+
+        // Method 2: Check if mention name matches bot name
+        if (mention.name && mention.name.includes(botName)) {
+          console.log(`  ✅ Bot "${botName}" was mentioned via name`);
+          isMentioned = true;
+          break;
+        }
+
+        // Method 3: Check if it's @all
+        if (mention.key === '@_all') {
+          console.log('  ✅ @all mention detected');
+          isMentioned = true;
+          break;
+        }
+
+        // Method 4: Check by app_id if available
+        if (botOpenId && mention.id?.app_id === botOpenId) {
+          console.log('  ✅ Bot mentioned via app_id');
+          isMentioned = true;
+          break;
+        }
+      }
+
+      if (!isMentioned) {
+        console.log('[FeishuWebhook] ❌ This bot was NOT mentioned, skipping');
+        console.log('[FeishuWebhook] (Another bot in the group was mentioned)');
+        return;
+      }
+
+      console.log('[FeishuWebhook] ✅ This bot WAS mentioned, processing message');
     }
 
     // Extract text
@@ -125,12 +293,48 @@ async function handleMessageEvent(data) {
 
     console.log('[FeishuWebhook] User text:', userText);
 
-    // Get or create session
-    const session = await sessionManager.getOrCreateSession(event);
+    // Get user nickname for directory prefix
+    const senderId = event.sender?.sender_id?.open_id;
+    const unionId = event.sender?.sender_id?.union_id;
+    let userNickname = null;
+    if (senderId) {
+      userNickname = await getUserDisplayName(senderId, unionId, chatId);
+      console.log('[FeishuWebhook] User nickname:', userNickname);
+    }
+
+    // Get or create session with user nickname
+    const session = await sessionManager.getOrCreateSession(event, userNickname);
     console.log('[FeishuWebhook] Session:', session.id);
 
-    // Get chat ID
-    const chatId = event.message?.chat_id || event.sender?.sender_id?.open_id;
+    // 🔧 Detect actual project directory (may be in subdirectory)
+    let actualWorkingDir = session.project_path;
+    try {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+
+      // Check if there's a subdirectory with actual project files
+      const entries = await fs.readdir(session.project_path, { withFileTypes: true });
+      const subdirs = entries.filter(e => e.isDirectory() && !e.name.startsWith('.'));
+
+      if (subdirs.length === 1) {
+        // If there's exactly one non-hidden subdirectory, use it
+        const subdir = path.join(session.project_path, subdirs[0].name);
+        const subdirEntries = await fs.readdir(subdir);
+
+        // Check if subdirectory contains project files (README.md, package.json, etc.)
+        const hasProjectFiles = subdirEntries.some(f =>
+          f === 'README.md' || f === 'package.json' || f === 'requirements.txt'
+        );
+
+        if (hasProjectFiles) {
+          actualWorkingDir = subdir;
+          console.log('[FeishuWebhook] 📂 Detected project subdirectory:', actualWorkingDir);
+        }
+      }
+    } catch (error) {
+      console.log('[FeishuWebhook] ⚠️  Failed to detect subdirectory:', error.message);
+      // Continue with original path
+    }
 
     // Check if busy
     if (sessionManager.isSessionBusy(session)) {
@@ -186,19 +390,25 @@ async function handleMessageEvent(data) {
       session.claude_session_id
     );
 
-    // Call Claude
+    // Call Claude with context isolation
     const claudeOptions = {
       sessionId: session.claude_session_id,
-      cwd: session.project_path,
+      cwd: actualWorkingDir,  // 🔧 Use detected actual working directory
       skipPermissions: true,
-      projectPath: session.project_path
+      projectPath: actualWorkingDir  // 🔧 Use detected actual working directory
     };
+
+    // 🔧 Add project context to prevent cross-project confusion
+    const contextPrefix = `[当前工作目录: ${actualWorkingDir}]\n[会话ID: ${session.conversation_id}]\n\n`;
+    const userTextWithContext = contextPrefix + userText;
 
     console.log('[FeishuWebhook] Calling Claude...');
     console.log('[FeishuWebhook] Claude options:', JSON.stringify(claudeOptions, null, 2));
+    console.log('[FeishuWebhook] 🔐 Session isolation - Conversation:', session.conversation_id);
+    console.log('[FeishuWebhook] 🔐 Working directory:', actualWorkingDir);
 
     try {
-      await queryClaude(userText, claudeOptions, writer);
+      await queryClaude(userTextWithContext, claudeOptions, writer);
 
       // Update session ID if changed
       if (writer.sessionId && writer.sessionId !== session.claude_session_id) {

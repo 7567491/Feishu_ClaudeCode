@@ -94,6 +94,36 @@ node server/show-processes.js
 node server/show-processes.js --json
 ```
 
+### 🔌 Bot-to-Bot 集成：AI初老师
+
+**场景：** 多个飞书机器人在同一个群里协作，AI初老师作为入口引导用户，小六负责实际开发任务。
+
+**架构：**
+```
+用户 → AI初老师（菜单引导） → 小六API（Claude Code执行） → 群聊响应
+```
+
+**实现方式：**
+- AI初老师使用HTTP API调用小六（`/api/feishu-proxy/query`）
+- 不使用@方式（飞书平台不推送bot之间的消息）
+- 小六接收API请求后在群里直接响应
+
+**AI初老师代码：** `/home/ccp/teacher/`
+```bash
+# 查看AI初老师日志
+tail -f /home/ccp/teacher/feishu_bot.log
+```
+
+**技术文档：**
+- [Bot-to-Bot解决方案](docs/BOT_TO_BOT_SOLUTION.md)
+- [AI初老师集成代码](docs/AI_TEACHER_INTEGRATION_CODE.md)
+- [RCA分析](docs/RCA_BOT_TO_BOT_MESSAGE.md)
+
+**关键代码位置：**
+- API端点：`server/routes/feishu-proxy.js`
+- AI初老师调用：`teacher/feishu_client.py:134` (`call_xiaoliu_api`)
+- 消息处理：`teacher/message_handler.py:193-201`
+
 ## 📂 项目结构
 
 ```
@@ -102,8 +132,9 @@ node server/show-processes.js --json
 ├── src/               # React 前端源码
 ├── dist/              # Vite 构建输出（生产）
 ├── feicc/             # 飞书会话隔离目录（自动创建 user-*/group-* 子目录）
+├── teacher/           # AI初老师机器人代码（Python + Flask）
 ├── scripts/           # 维护脚本（cleanup-temp-files.sh 等）
-├── test/feishu/       # 飞书集成测试
+├── test/              # 测试脚本
 ├── docs/              # 项目文档
 ├── backups/           # 备份文件（iptables、crontab）
 ├── logs/              # 应用日志
@@ -264,4 +295,4 @@ MIT License
 ---
 
 **最后更新**: 2025-11-27
-**版本**: v2.1 (会话管理与稳定性优化)
+**版本**: v2.2 (Bot-to-Bot集成与AI初老师协作)

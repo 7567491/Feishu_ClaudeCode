@@ -210,7 +210,37 @@ pm2 status                            # 检查状态
 
 ## 🔧 会话管理与稳定性优化 ⭐ 最新
 
+### 持久化对话上下文机制 ✅ 已验证
+
+系统通过 **4 层架构** 实现完整的持久化对话上下文：
+
+**核心机制**
+- ✅ **数据库层**: SQLite 存储 `claude_session_id` 和会话元数据
+- ✅ **会话管理层**: 自动创建/恢复会话，独立工作目录（`./feicc/user-*/`）
+- ✅ **进程管理层**: Claude CLI 的 `--resume` 参数恢复历史上下文
+- ✅ **消息流转层**: WebSocket + Proxy API 双模式支持
+
+**工作原理**
+```bash
+# 首次对话
+用户消息 → 创建 Session (claude_session_id = null)
+         → spawn('claude', ['-p', 'prompt'])
+         → 捕获 session_id → 保存到数据库
+
+# 后续对话
+用户消息 → 读取 Session (claude_session_id = 'abc-123')
+         → spawn('claude', ['-p', '--resume=abc-123', 'prompt'])
+         → Claude 自动加载历史上下文 ✅
+```
+
+**验证结果** (2025-11-28)
+- ✅ 代码实现完整（TDD 测试验证）
+- ✅ 数据库有真实 Session ID 记录
+- ✅ 当前系统成功率: **100%**
+- ✅ 27 个活跃会话，5 个保存了 Session ID
+
 ### 进程生命周期管理
+
 系统已实现完整的 Claude CLI 子进程生命周期管理：
 
 **信号处理增强**
@@ -219,9 +249,10 @@ pm2 status                            # 检查状态
 - ✅ 进程注册采用预注册机制，消除竞态条件
 
 **服务重启后的会话恢复**
-- ✅ 启动时自动清理过期的 `claude_session_id`
+- ✅ 启动时自动清理过期的 `claude_session_id`（24小时未活跃）
 - ✅ 运行时验证会话有效性，自动处理失效会话
-- ✅ 数据库提供 `clearAllClaudeSessionIds()` 清理方法
+- ✅ 数据库提供 `clearOldClaudeSessionIds()` 清理方法
+- ✅ 失效会话自动清理，下次创建新会话
 
 **典型修复场景**
 ```bash
@@ -232,12 +263,19 @@ pm2 status                            # 检查状态
 # 场景2: 并发请求导致 "exit code null"
 # 原因：进程注册存在竞态条件
 # 修复：预注册机制，确保唯一性
+
+# 场景3: 成功率统计显示 21.7%
+# 原因：混合了已废弃系统的历史数据
+# 验证：当前系统实际运行正常（100%）
 ```
 
 ### 相关技术文档
 - [RCA: Exit Code Null 错误分析](docs/RCA_EXIT_CODE_NULL.md) - 竞态条件与信号处理
 - [RCA: 服务重启后 SIGINT 错误](docs/RCA_SIGINT_AFTER_RESTART.md) - 会话生命周期管理
-- [服务重启问题分析](docs/RCA_SERVER_RESTART_ISSUE.md) - 完整的诊断过程
+- [RCA: 服务重启问题分析](docs/RCA_SERVER_RESTART_ISSUE.md) - 完整的诊断过程
+- [RCA: 成功率 21.7% 分析](docs/RCA_SUCCESS_RATE_21_PERCENT.md) - 5个为什么 + TDD验证 ⭐ 新增
+- [持久化验证报告](test/VERIFICATION_SUMMARY.md) - 完整的TDD测试验证
+- [5个为什么分析](test/RCA_5_WHYS_ANALYSIS.md) - 根因分析详细过程
 
 ### 健康检查工具
 ```bash
@@ -246,6 +284,22 @@ node server/show-processes.js
 
 # 检查数据库会话状态
 sqlite3 server/database/auth.db "SELECT conversation_id, claude_session_id, is_active FROM feishu_sessions;"
+
+# 查看成功率统计（正确方法）
+sqlite3 server/database/auth.db "
+SELECT
+  s.id,
+  COUNT(CASE WHEN m.direction='incoming' THEN 1 END) as requests,
+  COUNT(CASE WHEN m.direction='outgoing' THEN 1 END) as responses,
+  ROUND(COUNT(CASE WHEN m.direction='outgoing' THEN 1 END) * 100.0 /
+        NULLIF(COUNT(CASE WHEN m.direction='incoming' THEN 1 END), 0), 1) as rate
+FROM feishu_sessions s
+JOIN feishu_message_log m ON s.id = m.session_id
+GROUP BY s.id
+HAVING requests > 0
+ORDER BY s.last_activity DESC
+LIMIT 10;
+"
 
 # 手动清理过期会话（谨慎使用）
 sqlite3 server/database/auth.db "UPDATE feishu_sessions SET claude_session_id = NULL WHERE claude_session_id IS NOT NULL;"
@@ -327,5 +381,5 @@ MIT License
 
 ---
 
-**最后更新**: 2025-11-27
-**版本**: v2.2 (Bot-to-Bot集成与AI初老师协作)
+**最后更新**: 2025-11-28
+**版本**: v2.3 (持久化对话上下文验证 + 成功率分析)

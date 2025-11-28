@@ -1079,4 +1079,41 @@ export class FeishuClient {
       return null;
     }
   }
+
+  /**
+   * Get chat info (name, description, owner, etc.)
+   * @param {string} chatId - Chat ID (e.g., oc_xxx)
+   * @returns {Promise<Object|null>} Chat info object or null if failed
+   */
+  async getChatInfo(chatId) {
+    try {
+      console.log('[FeishuClient] Getting chat info for:', chatId);
+
+      const res = await this.client.im.chat.get({
+        path: {
+          chat_id: chatId
+        }
+      });
+
+      if (res.code === 0) {
+        const chat = res.data;
+        console.log('[FeishuClient] Got chat info:', chat?.name);
+        return {
+          chat_id: chatId,
+          name: chat?.name,
+          description: chat?.description,
+          owner_id: chat?.owner_id,
+          chat_mode: chat?.chat_mode,
+          chat_type: chat?.chat_type
+        };
+      } else {
+        console.error('[FeishuClient] Failed to get chat info:', res.code, res.msg);
+        return null;
+      }
+
+    } catch (error) {
+      console.error('[FeishuClient] Error getting chat info:', error.message);
+      return null;
+    }
+  }
 }

@@ -204,12 +204,48 @@ async function handleMessageEvent(data) {
       }
     }
 
+    // Extract text early for command detection
+    const content = event.message?.content;
+    if (!content) {
+      console.log('[FeishuWebhook] No content in message');
+      return;
+    }
+
+    let parsedContent;
+    try {
+      parsedContent = JSON.parse(content);
+    } catch (error) {
+      console.error('[FeishuWebhook] Failed to parse content:', error.message);
+      return;
+    }
+
+    let userText = parsedContent.text || parsedContent.content || '';
+
+    // 确保可替换，处理数组/对象/空值
+    if (!userText || typeof userText.replace !== 'function') {
+      if (Array.isArray(userText)) {
+        userText = userText.map(item => {
+          if (typeof item === 'string') return item;
+          if (item && typeof item === 'object' && item.text) return item.text;
+          return '';
+        }).filter(Boolean).join(' ');
+      } else if (userText && typeof userText === 'object' && userText.text) {
+        userText = userText.text;
+      } else {
+        userText = String(userText || '');
+      }
+    }
+
+    // Remove @mentions for command detection
+    const cleanedForCommand = userText.replace(/@[^\s]+\s*/g, '').trim();
+    const isSendMdCommand = /发送\s*[^\s]+\.(md)/i.test(cleanedForCommand);
+
     if (chatType === 'group') {
       const mentions = event.message?.mentions || [];
       console.log('  Mentions count:', mentions.length);
       console.log('  Mentions details:', JSON.stringify(mentions, null, 2));
 
-      if (mentions.length === 0) {
+      if (mentions.length === 0 && !isSendMdCommand) {
         console.log('[FeishuWebhook] Group message without mention, skipping');
         return;
       }
@@ -252,7 +288,7 @@ async function handleMessageEvent(data) {
         }
       }
 
-      if (!isMentioned) {
+      if (!isMentioned && !isSendMdCommand) {
         console.log('[FeishuWebhook] ❌ This bot was NOT mentioned, skipping');
         console.log('[FeishuWebhook] (Another bot in the group was mentioned)');
         return;
@@ -261,30 +297,8 @@ async function handleMessageEvent(data) {
       console.log('[FeishuWebhook] ✅ This bot WAS mentioned, processing message');
     }
 
-    // Extract text
-    const content = event.message?.content;
-    if (!content) {
-      console.log('[FeishuWebhook] No content in message');
-      return;
-    }
-
-    let parsedContent;
-    try {
-      parsedContent = JSON.parse(content);
-    } catch (error) {
-      console.error('[FeishuWebhook] Failed to parse content:', error.message);
-      return;
-    }
-
-    let userText = parsedContent.text || parsedContent.content || '';
-
-    // Ensure userText is a string (防止 TypeError: userText.replace is not a function)
-    if (typeof userText !== 'string') {
-      userText = String(userText || '');
-    }
-
-    // Remove @mentions
-    userText = userText.replace(/@[^\s]+\s*/g, '').trim();
+    // Remove @mentions for final processing
+    userText = cleanedForCommand;
 
     if (!userText) {
       console.log('[FeishuWebhook] Empty message after cleaning');
@@ -385,9 +399,13 @@ async function handleMessageEvent(data) {
 
     // Create message writer
     const writer = new FeishuMessageWriter(
-      { sendTextMessage: (chatId, text) => sendMessage(chatId, text) },
+      {
+        sendTextMessage: (chatId, text) => sendMessage(chatId, text),
+        sendFile: (chatId, filePath) => feishuClient.sendFile(chatId, filePath)
+      },
       chatId,
-      session.claude_session_id
+      session.claude_session_id,
+      actualWorkingDir
     );
 
     // Call Claude with context isolation

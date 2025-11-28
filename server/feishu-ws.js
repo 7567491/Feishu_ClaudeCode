@@ -94,19 +94,19 @@ class FeishuService {
       // Load configuration
       const config = await this.loadConfig();
 
-      // Create session manager
-      this.sessionManager = new FeishuSessionManager(this.userId, './feicc');
-
-      // Clear all stale Claude session IDs on startup (after service restart)
-      console.log('[FeishuService] 🧹 Clearing stale Claude session IDs after restart...');
-      const staleCount = feishuDb.clearAllClaudeSessionIds();
-      console.log(`[FeishuService] ✅ Cleared ${staleCount} stale session IDs`);
-
-      // Create Feishu client
+      // Create Feishu client first
       this.client = new FeishuClient({
         appId: config.appId,
         appSecret: config.appSecret
       });
+
+      // Create session manager with client reference
+      this.sessionManager = new FeishuSessionManager(this.userId, './feicc', this.client);
+
+      // Clear old Claude session IDs on startup (only sessions inactive for 24+ hours)
+      console.log('[FeishuService] 🧹 Clearing Claude session IDs inactive for 24+ hours...');
+      const staleCount = feishuDb.clearOldClaudeSessionIds(24);
+      console.log(`[FeishuService] ✅ Cleared ${staleCount} old session IDs (24h+ inactive)`);
 
       // Start client with message handler
       await this.client.start(this.handleMessage.bind(this));
@@ -114,7 +114,7 @@ class FeishuService {
       // Create and start file watcher
       const watchPath = path.resolve(__dirname, '..');
       this.fileWatcher = new FeishuFileWatcher(watchPath, {
-        enabled: true,
+        enabled: false, // 关闭自动推送，改为按指令发送
         debounceDelay: 3000
       });
       this.fileWatcher.setClient(this.client);
@@ -206,6 +206,27 @@ class FeishuService {
         // Continue anyway
       }
 
+      // Check if this is a /clear command to reset conversation context
+      if (userText.trim().toLowerCase() === '/clear') {
+        console.log('[FeishuService] /clear command detected, clearing session context');
+
+        try {
+          // Clear Claude session ID from database
+          feishuDb.clearSessionClaudeSessionId(session.id);
+
+          // Send confirmation
+          await this.client.sendTextMessage(chatId, '🔄 会话已重置，上下文已清空。');
+
+          console.log('[FeishuService] Session context cleared successfully');
+          return;
+
+        } catch (error) {
+          console.error('[FeishuService] Failed to clear session:', error.message);
+          await this.client.sendTextMessage(chatId, `❌ 清空失败: ${error.message}`);
+          return;
+        }
+      }
+
       // Check if this is a file send command
       const fileCommand = FeishuFileHandler.parseFileCommand(userText);
       if (fileCommand && fileCommand.command === 'send') {
@@ -241,7 +262,8 @@ class FeishuService {
       const writer = new FeishuMessageWriter(
         this.client,
         chatId,
-        session.claude_session_id
+        session.claude_session_id,
+        session.project_path
       );
 
       // Track Claude session ID

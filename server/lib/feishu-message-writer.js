@@ -5,13 +5,17 @@
  * Accumulates Claude's streaming output and sends to Feishu in chunks.
  */
 
+import { FeishuFileHandler } from './feishu-file-handler.js';
+
 export class FeishuMessageWriter {
-  constructor(feishuClient, chatId, sessionId = null) {
+  constructor(feishuClient, chatId, sessionId = null, projectPath = null) {
     this.feishuClient = feishuClient; // Feishu client instance
     this.chatId = chatId; // Feishu chat_id or open_id
     this.sessionId = sessionId; // Claude session ID (set later)
+    this.projectPath = projectPath; // Project root for resolving files
 
     this.buffer = ''; // Accumulated text buffer
+    this.collectedText = ''; // Full text for post-processing
     this.lastFlushTime = Date.now(); // Last time we sent a message
     this.flushInterval = 3000; // 3 seconds
     this.flushThreshold = 2000; // 2000 characters
@@ -147,6 +151,7 @@ export class FeishuMessageWriter {
    */
   appendText(text) {
     this.buffer += text;
+    this.collectedText += text;
     console.log('[FeishuWriter] Buffer size:', this.buffer.length);
   }
 
@@ -268,6 +273,9 @@ export class FeishuMessageWriter {
       await this.flush();
     }
 
+    // Auto-send mentioned markdown files after all text flushed
+    await this.sendMentionedMarkdownFiles();
+
     console.log('[FeishuWriter] Message stream completed');
   }
 
@@ -306,6 +314,36 @@ export class FeishuMessageWriter {
     } catch (error) {
       console.error('[FeishuWriter] Failed to send file:', error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Detect and send any markdown files mentioned in the response text
+   */
+  async sendMentionedMarkdownFiles() {
+    if (!this.projectPath || !this.collectedText) return;
+
+    try {
+      const matches = this.collectedText.match(/\b[^\s`'"<>]+\.(md)\b/gi);
+      if (!matches) return;
+
+      const uniqueFiles = [...new Set(matches.map((name) => name.replace(/[，。,.;:]+$/, '')))];
+
+      for (const fileName of uniqueFiles) {
+        const filePath = FeishuFileHandler.findFile(this.projectPath, fileName);
+        if (!filePath) {
+          console.log('[FeishuWriter] Mentioned markdown not found:', fileName);
+          continue;
+        }
+
+        await this.feishuClient.sendTextMessage(
+          this.chatId,
+          `📄 检测到引用 ${fileName}，正在发送...`
+        );
+        await this.sendFile(filePath);
+      }
+    } catch (error) {
+      console.error('[FeishuWriter] Failed to send mentioned markdown files:', error.message);
     }
   }
 }

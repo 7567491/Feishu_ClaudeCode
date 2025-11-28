@@ -16,13 +16,13 @@ import { spawn } from 'child_process';
 import path from 'path';
 
 export class FeishuSessionManager {
-  constructor(userId, baseDir = './feicc', userNickname = null) {
+  constructor(userId, baseDir = './feicc', feishuClient = null) {
     this.userId = userId; // User ID for database operations
     this.baseDir = baseDir; // Base directory for Feishu projects
-    this.userNickname = userNickname; // User nickname for directory prefix
+    this.feishuClient = feishuClient; // Feishu client for API calls
     console.log('[SessionManager] Initialized with base dir:', this.baseDir);
-    if (userNickname) {
-      console.log('[SessionManager] User nickname:', userNickname);
+    if (feishuClient) {
+      console.log('[SessionManager] Feishu client provided for chat info lookup');
     }
   }
 
@@ -153,12 +153,33 @@ export class FeishuSessionManager {
     // Session doesn't exist - create new one
     console.log('[SessionManager] Creating new session for:', conversationId);
 
-    // Create project directory path WITHOUT nickname prefix
-    // Session directories use conversationId only (e.g., user-xxx or group-xxx)
-    // Only user project directories (created by other means) use nickname prefix
-    const directoryName = conversationId;
-    const projectPath = path.join(this.baseDir, directoryName);
-    const absolutePath = path.resolve(projectPath);
+    // Determine project path based on chat name (for group chats) or default
+    let absolutePath;
+    let chatName = null;
+
+    if (sessionType === 'group') {
+      // For group chats, try to get chat info to determine custom path
+      try {
+        const chatInfo = await this.getChatInfo(feishuId);
+        chatName = chatInfo?.name;
+        console.log('[SessionManager] Group chat name:', chatName);
+
+        // Check if chat name matches any custom path rule
+        absolutePath = this.getCustomProjectPath(chatName, conversationId);
+
+      } catch (error) {
+        console.error('[SessionManager] Failed to get chat info:', error.message);
+        // Fallback to default path
+        const defaultPath = path.join(this.baseDir, conversationId);
+        absolutePath = path.resolve(defaultPath);
+      }
+    } else {
+      // Private chats use default path
+      const defaultPath = path.join(this.baseDir, conversationId);
+      absolutePath = path.resolve(defaultPath);
+    }
+
+    console.log('[SessionManager] ✨ Final project path:', absolutePath);
 
     // Create directory if it doesn't exist
     await this.ensureDirectoryExists(absolutePath);
@@ -325,5 +346,74 @@ export class FeishuSessionManager {
         resolve();
       });
     });
+  }
+
+  /**
+   * Get chat info using Feishu client
+   * @param {string} chatId - Chat ID
+   * @returns {Promise<Object|null>} Chat info or null
+   */
+  async getChatInfo(chatId) {
+    if (!this.feishuClient) {
+      console.log('[SessionManager] No Feishu client available');
+      return null;
+    }
+
+    try {
+      return await this.feishuClient.getChatInfo(chatId);
+    } catch (error) {
+      console.error('[SessionManager] Failed to get chat info:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Determine custom project path based on chat name
+   * Supports environment variable configuration and built-in rules
+   * @param {string} chatName - Chat name from Feishu
+   * @param {string} conversationId - Fallback conversation ID
+   * @returns {string} Absolute project path
+   */
+  getCustomProjectPath(chatName, conversationId) {
+    // Load rules from environment variable
+    let pathRules = [];
+
+    try {
+      const rulesJson = process.env.FEISHU_CHAT_PATH_RULES;
+      if (rulesJson) {
+        pathRules = JSON.parse(rulesJson);
+        console.log('[SessionManager] Loaded path rules from environment:', pathRules.length);
+      }
+    } catch (error) {
+      console.error('[SessionManager] Failed to parse FEISHU_CHAT_PATH_RULES:', error.message);
+    }
+
+    // Built-in default rules (fallback if no env config)
+    if (pathRules.length === 0) {
+      pathRules = [
+        {
+          namePrefix: '会飞的CC',
+          path: '/home/ccp'
+        }
+        // 可以添加更多内置规则
+      ];
+      console.log('[SessionManager] Using built-in path rules');
+    }
+
+    // Check if chat name matches any rule
+    if (chatName) {
+      for (const rule of pathRules) {
+        if (chatName.startsWith(rule.namePrefix)) {
+          console.log(`[SessionManager] ✅ Matched rule: "${rule.namePrefix}" -> ${rule.path}`);
+          return path.resolve(rule.path);
+        }
+      }
+      console.log(`[SessionManager] Chat "${chatName}" does not match any rule`);
+    }
+
+    // Default: use baseDir + conversationId
+    const defaultPath = path.join(this.baseDir, conversationId);
+    console.log('[SessionManager] Using default path:', defaultPath);
+    return path.resolve(defaultPath);
   }
 }

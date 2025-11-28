@@ -89,8 +89,13 @@ async function queryClaude(command, options = {}, ws) {
     // Use cwd (actual project directory) instead of projectPath
     const workingDir = cwd || projectPath || process.cwd();
 
-    // Get Claude CLI path from environment or use default (absolute path to avoid ENOENT)
-    const claudeCliPath = process.env.CLAUDE_CLI_PATH || '/usr/bin/claude';
+    // Get Claude CLI path with fallback，避免 ENOENT
+    let claudeCliPath = process.env.CLAUDE_CLI_PATH || '/usr/bin/claude';
+    try {
+      await fs.access(claudeCliPath);
+    } catch {
+      claudeCliPath = 'claude'; // 回退到 PATH
+    }
 
     // Load gaccode authentication token
     const gaccodeToken = await loadGaccodeToken();

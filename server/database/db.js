@@ -404,7 +404,32 @@ const feishuDb = {
     }
   },
 
-  // Clear all Claude session IDs (useful after service restart)
+  // Clear single session's Claude session ID (used by /clear command)
+  clearSessionClaudeSessionId: (sessionId) => {
+    try {
+      const result = db.prepare('UPDATE feishu_sessions SET claude_session_id = NULL WHERE id = ?').run(sessionId);
+      return result.changes;
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  // Clear Claude session IDs older than specified hours (useful after service restart)
+  clearOldClaudeSessionIds: (hours = 24) => {
+    try {
+      const result = db.prepare(`
+        UPDATE feishu_sessions
+        SET claude_session_id = NULL
+        WHERE claude_session_id IS NOT NULL
+          AND datetime(last_activity) < datetime('now', '-${hours} hours')
+      `).run();
+      return result.changes;
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  // Clear all Claude session IDs (kept for backward compatibility)
   clearAllClaudeSessionIds: () => {
     try {
       const result = db.prepare('UPDATE feishu_sessions SET claude_session_id = NULL WHERE claude_session_id IS NOT NULL').run();
@@ -437,14 +462,27 @@ const feishuDb = {
   // Log a message
   logMessage: (sessionId, direction, messageType, content, messageId = null) => {
     try {
-      const stmt = db.prepare(`
-        INSERT INTO feishu_message_log
-        (session_id, message_id, direction, message_type, content)
-        VALUES (?, ?, ?, ?, ?)
-      `);
+      // 如果 messageId 存在，使用 OR IGNORE 避免重复插入导致唯一约束错误
+      const stmt = messageId
+        ? db.prepare(`
+            INSERT OR IGNORE INTO feishu_message_log
+            (session_id, message_id, direction, message_type, content)
+            VALUES (?, ?, ?, ?, ?)
+          `)
+        : db.prepare(`
+            INSERT INTO feishu_message_log
+            (session_id, message_id, direction, message_type, content)
+            VALUES (?, ?, ?, ?, ?)
+          `);
+
       const result = stmt.run(sessionId, messageId, direction, messageType, content);
-      return { id: result.lastInsertRowid };
+      const ignored = messageId ? result.changes === 0 : false;
+      return { id: ignored ? null : result.lastInsertRowid, ignored };
     } catch (err) {
+      // 兜底处理旧库上的唯一约束，保持幂等
+      if (messageId && err.message?.includes('UNIQUE constraint failed')) {
+        return { id: null, ignored: true };
+      }
       throw err;
     }
   },

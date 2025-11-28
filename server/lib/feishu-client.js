@@ -787,7 +787,8 @@ export class FeishuClient {
         folderToken = null,
         setPermission = true,  // 默认设置权限！
         permissionType = 'public',
-        linkShareEntity = 'anyone_can_view'
+        // 默认改为“任何人可编辑”（需飞书后台权限支持）
+        linkShareEntity = 'anyone_can_edit'
       } = options;
 
       console.log('[FeishuClient] Creating document from markdown:', title);
@@ -857,7 +858,8 @@ export class FeishuClient {
 
       const {
         type = 'docx',
-        linkShareEntity = 'anyone_can_view',
+        // 默认允许任何人编辑（需后台权限配置）
+        linkShareEntity = 'anyone_can_edit',
         externalAccessEntity = 'open'
       } = options;
 
@@ -937,7 +939,7 @@ export class FeishuClient {
         folderToken = null,
         setPermission = true,
         permissionType = 'public',
-        linkShareEntity = 'anyone_can_view'
+        linkShareEntity = 'anyone_can_edit'
       } = options;
 
       console.log('[FeishuClient] Creating document from markdown with permission:', title);

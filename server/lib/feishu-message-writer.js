@@ -336,10 +336,6 @@ export class FeishuMessageWriter {
           continue;
         }
 
-        await this.feishuClient.sendTextMessage(
-          this.chatId,
-          `📄 检测到引用 ${fileName}，正在发送...`
-        );
         await this.sendFile(filePath);
       }
     } catch (error) {

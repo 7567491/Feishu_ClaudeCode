@@ -228,21 +228,37 @@ class FeishuService {
       }
 
       // Check if this is a file send command
+      const convertCommand = FeishuFileHandler.parseConvertCommand(userText);
+      if (convertCommand && convertCommand.command === 'convert') {
+        console.log('[FeishuService] File convert command detected:', convertCommand.fileName);
+        try {
+          await FeishuFileHandler.handleFileConvert(
+            this.client,
+            chatId,
+            session.project_path,
+            convertCommand.fileName
+          );
+          feishuDb.logMessage(session.id, 'outgoing', 'file', `convert:${convertCommand.fileName}`, null);
+          feishuDb.updateSessionActivity(session.id);
+          return;
+        } catch (error) {
+          console.error('[FeishuService] Failed to convert file:', error.message);
+          await this.client.sendTextMessage(chatId, `❌ 转化失败: ${error.message}`);
+          return;
+        }
+      }
+
       const fileCommand = FeishuFileHandler.parseFileCommand(userText);
       if (fileCommand && fileCommand.command === 'send') {
         console.log('[FeishuService] File send command detected:', fileCommand.fileName);
 
         try {
-          await this.client.sendTextMessage(chatId, `📤 正在发送文件: ${fileCommand.fileName}...`);
-
           await FeishuFileHandler.handleFileSend(
             this.client,
             chatId,
             session.project_path,
             fileCommand.fileName
           );
-
-          await this.client.sendTextMessage(chatId, `✅ 文件已发送: ${fileCommand.fileName}`);
 
           // Log success
           feishuDb.logMessage(session.id, 'outgoing', 'file', fileCommand.fileName, null);

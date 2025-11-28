@@ -220,14 +220,6 @@ export class FeishuFileWatcher {
    */
   async sendAsFeishuDocument(fullPath, relativePath, changeType, sizeKB) {
     try {
-      // Send notification message
-      const emoji = changeType === 'created' ? '📝' : '✏️';
-      const action = changeType === 'created' ? '新建' : '修改';
-      await this.client.sendTextMessage(
-        this.activeChatId,
-        `${emoji} 检测到文件${action}: ${relativePath} (${sizeKB}KB)\n正在创建飞书文档...`
-      );
-
       // Read file content
       const content = fs.readFileSync(fullPath, 'utf-8');
 
@@ -254,14 +246,6 @@ export class FeishuFileWatcher {
    */
   async sendAsFileAttachment(fullPath, relativePath, changeType, sizeKB) {
     try {
-      // Send notification message
-      const emoji = changeType === 'created' ? '📝' : '✏️';
-      const action = changeType === 'created' ? '新建' : '修改';
-      await this.client.sendTextMessage(
-        this.activeChatId,
-        `${emoji} 检测到文件${action}: ${relativePath} (${sizeKB}KB)\n正在自动发送...`
-      );
-
       // Send the file
       await this.client.sendFile(this.activeChatId, fullPath);
 

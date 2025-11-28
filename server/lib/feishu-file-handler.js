@@ -106,7 +106,32 @@ export class FeishuFileHandler {
       if (found) return found;
     }
 
-    // Try direct path first
+    // 🔧 FIX: Check if fileName contains path separators (relative path)
+    // If it does, resolve it against projectPath but prevent double-pathing
+    if (cleaned.includes('/') || cleaned.includes(path.sep)) {
+      // Try as relative path from projectPath
+      const relativePath = path.join(projectPath, cleaned);
+      if (fs.existsSync(relativePath)) {
+        return relativePath;
+      }
+
+      // 🔧 FIX: If fileName starts with projectPath components, try resolving from root
+      // Example: fileName="home/ccp/feicc/..." should resolve to "/home/ccp/feicc/..."
+      const possibleAbsolutePath = path.resolve('/', cleaned);
+      if (fs.existsSync(possibleAbsolutePath)) {
+        return possibleAbsolutePath;
+      }
+
+      // 🔧 Try extracting just the filename and search
+      const justFilename = path.basename(cleaned);
+      if (justFilename !== cleaned) {
+        // Recursively search with just the filename
+        const found = this.findFile(projectPath, justFilename);
+        if (found) return found;
+      }
+    }
+
+    // Try direct path first (only for simple filenames without path separators)
     const directPath = path.join(projectPath, cleaned);
     if (fs.existsSync(directPath)) {
       return directPath;

@@ -131,6 +131,8 @@ tail -f /home/ccp/teacher/feishu_bot.log
 - API端点：`server/routes/feishu-proxy.js`
 - AI初老师调用：`teacher/feishu_client.py:134` (`call_xiaoliu_api`)
 - 消息处理：`teacher/message_handler.py:193-201`
+- 提示词配置：`teacher/prompts.json`（1/2 开头=前端单页，3 开头=全栈；域名统一 `https://s.linapp.fun/{用户拼音}_{应用拼音}.html`）
+- Markdown 发送：Claude 回复里提到的 `*.md` 会自动附带发送；文件监听自动推送默认关闭，可在 `FeishuFileWatcher` 中启用
 
 ## 📂 项目结构
 

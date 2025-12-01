@@ -102,7 +102,7 @@ node server/show-processes.js
 node server/show-processes.js --json
 ```
 
-### 🔌 Bot-to-Bot 集成：AI初老师
+### 🔌 Bot-to-Bot 集成：AI初老师 ⭐ 重要机器人代码
 
 **场景：** 多个飞书机器人在同一个群里协作，AI初老师作为入口引导用户，小六负责实际开发任务。
 
@@ -116,7 +116,7 @@ node server/show-processes.js --json
 - 不使用@方式（飞书平台不推送bot之间的消息）
 - 小六接收API请求后在群里直接响应
 
-**AI初老师代码：** `/home/ccp/teacher/`
+**AI初老师代码：** `/home/ccp/teacher/` ⚠️ 非常重要的机器人核心代码
 ```bash
 # 查看AI初老师日志
 tail -f /home/ccp/teacher/feishu_bot.log
@@ -140,7 +140,7 @@ tail -f /home/ccp/teacher/feishu_bot.log
 ├── src/               # React 前端源码
 ├── dist/              # Vite 构建输出（生产）
 ├── feicc/             # 飞书会话隔离目录（自动创建 user-*/group-* 子目录）
-├── teacher/           # AI初老师机器人代码（Python + Flask）
+├── teacher/           # ⭐ AI初老师机器人代码（Python + Flask）- 非常重要的Bot-to-Bot核心代码
 ├── scripts/           # 维护脚本（cleanup-temp-files.sh 等）
 ├── test/              # 测试脚本
 ├── docs/              # 项目文档

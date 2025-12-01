@@ -21,7 +21,7 @@ class Config:
     XIAOLIU_API_KEY = os.getenv("XIAOLIU_API_KEY", "")
 
     # 服务器配置
-    WEBHOOK_PORT = int(os.getenv("TEACHER_WEBHOOK_PORT", "8082"))
+    WEBHOOK_PORT = int(os.getenv("TEACHER_WEBHOOK_PORT", "33301"))
     WEBHOOK_PATH = os.getenv("TEACHER_WEBHOOK_PATH", "/webhook/feishu")
 
     # 日志配置

@@ -1,7 +1,7 @@
 module.exports = {
   apps: [{
     name: 'ai-teacher',
-    script: 'main.py',
+    script: 'app.py',
     interpreter: 'python3',
     cwd: '/home/ccp/teacher',
     env: {

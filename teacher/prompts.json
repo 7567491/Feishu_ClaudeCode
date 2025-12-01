@@ -1,0 +1,4 @@
+{
+  "frontend_prompt": "开发一个小游戏，小游戏名称：{app_name}，使用单网页html架构\nHTML标题显示：{user_nickname}的{app_name}\n文件名{user_pinyin}_{app_pinyin}.html，拷贝到挂载网盘/mnt/www, 并使得域名https://s.linapp.fun/{user_pinyin}_{app_pinyin}.html可访问",
+  "fullstack_prompt": "开发一个前端html+后端python+json格式数据存储的应用\n项目目录={project_dir}, 所有相关文件放在项目目录里\n\n在目录里依次生成三个md文件：\n需求文档need(不超过500字) 架构设计文档design(不超过800字)\n计划和具体任务文档plan(不超过500字)，每个任务前面放[ ]表示开发完成/未完成\n每生成一个md文件，就发送md文件到本对话\n\n前端开发说明：使用单html网页，HTML标题显示\"{user_nickname}的{app_name}\"，适当美化，能够适配手机端\n后端架构说明：使用python，后端端口（如果需要）：端口占用表存放在/home/ccp/teacher/port.csv, 选择57001开始的端口，如果端口已经被占用则+1，直到找到没有被占用的端口，并记录到表里\n数据存储：使用json格式，设计合适的数据格式\n运维说明：配置nginx使用https://s.linapp.fun/{user_pinyin}_{app_pinyin}.html作为域名，并测试可访问\n\n直到全部开发完毕生成md格式文件readme（800字以内）并发送到本对话"
+}

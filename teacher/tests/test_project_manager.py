@@ -48,7 +48,7 @@ class TestProjectManager(unittest.TestCase):
         self.assertIn("小游戏名称：扫雷", prompt)
         self.assertIn("HTML标题显示：张三的扫雷", prompt)
         self.assertIn("文件名zhangsan_saolei.html", prompt)
-        self.assertIn("http://zhangsan_saolei.linapp.fun", prompt)
+        self.assertIn("https://s.linapp.fun/zhangsan_saolei.html", prompt)
 
     def test_generate_fullstack_prompt(self):
         """测试生成全栈应用Prompt"""
@@ -65,7 +65,7 @@ class TestProjectManager(unittest.TestCase):
         self.assertIn("开发一个前端html+后端python+json格式数据存储的应用", prompt)
         self.assertIn("项目目录=lisi_31", prompt)
         self.assertIn("HTML标题显示\"李四的任务待办清单\"", prompt)
-        self.assertIn("http://lisi_renwudaibanqingdan.linapp.fun", prompt)
+        self.assertIn("https://s.linapp.fun/lisi_renwudaibanqingdan.html", prompt)
         self.assertIn("端口占用表存放在/home/ccp/teacher/port.csv", prompt)
         self.assertIn("57001", prompt)
 

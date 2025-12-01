@@ -4,20 +4,73 @@
 """
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict
+import json
 
 
 class ProjectManager:
     """项目管理器"""
 
-    def __init__(self, base_dir: str = "/home/ccp/feicc"):
+    def __init__(self, base_dir: str = "/home/ccp/feicc", prompts_file: str = None):
         """
         初始化项目管理器
 
         Args:
             base_dir: 项目基础目录
+            prompts_file: 提示词配置文件路径
         """
         self.base_dir = base_dir
+        self.prompts = self._load_prompts(prompts_file)
+
+    def _load_prompts(self, prompts_file: Optional[str]) -> Dict[str, str]:
+        """
+        加载提示词配置
+
+        Args:
+            prompts_file: 配置文件路径
+
+        Returns:
+            包含前端和全栈提示词的字典
+        """
+        # 默认路径：teacher/prompts.json
+        default_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "prompts.json"
+        )
+        file_path = prompts_file or default_path
+
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return {
+                    "frontend_prompt": data.get("frontend_prompt", ""),
+                    "fullstack_prompt": data.get("fullstack_prompt", "")
+                }
+            except Exception:
+                pass
+
+        # 回退默认模板（保持与chu.md一致）
+        return {
+            "frontend_prompt": (
+                "开发一个小游戏，小游戏名称：{app_name}，使用单网页html架构\n"
+                "HTML标题显示：{user_nickname}的{app_name}\n"
+                "文件名{user_pinyin}_{app_pinyin}.html，拷贝到挂载网盘/mnt/www, 并使得域名https://s.linapp.fun/{user_pinyin}_{app_pinyin}.html可访问"
+            ),
+            "fullstack_prompt": (
+                "开发一个前端html+后端python+json格式数据存储的应用\n"
+                "项目目录={project_dir}, 所有相关文件放在项目目录里\n\n"
+                "在目录里依次生成三个md文件：\n"
+                "需求文档need(不超过500字) 架构设计文档design(不超过800字)\n"
+                "计划和具体任务文档plan(不超过500字)，每个任务前面放[ ]表示开发完成/未完成\n"
+                "每生成一个md文件，就发送md文件到本对话\n\n"
+                "前端开发说明：使用单html网页，HTML标题显示\"{user_nickname}的{app_name}\"，适当美化，能够适配手机端\n"
+                "后端架构说明：使用python，后端端口（如果需要）：端口占用表存放在/home/ccp/teacher/port.csv, 选择57001开始的端口，如果端口已经被占用则+1，直到找到没有被占用的端口，并记录到表里\n"
+                "数据存储：使用json格式，设计合适的数据格式\n"
+                "运维说明：配置nginx使用https://s.linapp.fun/{user_pinyin}_{app_pinyin}.html作为域名，并测试可访问\n\n"
+                "直到全部开发完毕生成md格式文件readme（800字以内）并发送到本对话"
+            )
+        }
 
     def create_project_dir(self, user_pinyin: str, app_id: int) -> str:
         """
@@ -54,10 +107,13 @@ class ProjectManager:
         Returns:
             Prompt文本
         """
-        prompt = f"""开发一个小游戏，小游戏名称：{app_name}，使用单网页html架构
-HTML标题显示：{user_nickname}的{app_name}
-文件名{user_pinyin}_{app_pinyin}.html，拷贝到挂载网盘/mnt/www, 并使得域名http://{user_pinyin}_{app_pinyin}.linapp.fun可访问"""
-        return prompt
+        template = self.prompts.get("frontend_prompt")
+        return template.format(
+            app_name=app_name,
+            user_nickname=user_nickname,
+            user_pinyin=user_pinyin,
+            app_pinyin=app_pinyin
+        )
 
     def generate_fullstack_prompt(
         self,
@@ -82,21 +138,14 @@ HTML标题显示：{user_nickname}的{app_name}
         Returns:
             Prompt文本
         """
-        prompt = f"""开发一个前端html+后端python+json格式数据存储的应用
-项目目录={project_dir}, 所有相关文件放在项目目录里
-
-在目录里依次生成三个md文件：
-需求文档need(不超过500字) 架构设计文档design(不超过800字)
-计划和具体任务文档plan(不超过500字)，每个任务前面放[ ]表示开发完成/未完成
-每生成一个md文件，就发送md文件到本对话
-
-前端开发说明：使用单html网页，HTML标题显示"{user_nickname}的{app_name}"，适当美化，能够适配手机端
-后端架构说明：使用python，后端端口（如果需要）：端口占用表存放在/home/ccp/teacher/port.csv, 选择57001开始的端口，如果端口已经被占用则+1，直到找到没有被占用的端口，并记录到表里
-数据存储：使用json格式，设计合适的数据格式
-运维说明：配置nginx使用http://{user_pinyin}_{app_pinyin}.linapp.fun作为域名，并测试可访问
-
-直到全部开发完毕生成md格式文件readme（800字以内）并发送到本对话"""
-        return prompt
+        template = self.prompts.get("fullstack_prompt")
+        return template.format(
+            user_nickname=user_nickname,
+            user_pinyin=user_pinyin,
+            app_name=app_name,
+            app_pinyin=app_pinyin,
+            project_dir=project_dir
+        )
 
     def generate_bot2bot_message(
         self,

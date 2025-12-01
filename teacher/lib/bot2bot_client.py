@@ -5,6 +5,7 @@ Bot-to-Bot通信客户端
 import requests
 import json
 import logging
+import os
 from typing import Dict, Optional
 
 
@@ -14,14 +15,18 @@ logger = logging.getLogger(__name__)
 class Bot2BotClient:
     """Bot-to-Bot通信客户端"""
 
-    def __init__(self, api_url: str = "http://localhost:3011/api/feishu-proxy/query"):
+    def __init__(self, api_url: Optional[str] = None):
         """
         初始化Bot-to-Bot客户端
 
         Args:
             api_url: 小六API地址
         """
-        self.api_url = api_url
+        self.api_url = api_url or os.getenv(
+            "XIAOLIU_API_URL",
+            "http://localhost:33300/api/feishu-proxy/query"
+        )
+        self.api_key = os.getenv("XIAOLIU_API_KEY")
         self.timeout = 30
 
     def send_to_xiaoliu(
@@ -44,17 +49,31 @@ class Bot2BotClient:
             响应结果字典
         """
         try:
-            payload = {
-                "query": prompt,
-                "fromBot": from_bot,
-                "toBot": "小六",
-                "userId": user_id,
-                "chatId": chat_id,
-                "context": {
-                    "type": "task",
-                    "source": "AI_Teacher"
+            # 跳过明显的占位/测试 chat_id，避免无效 open_id 调用
+            placeholder_prefixes = ("test_", "mock_", "debug_", "dev_")
+            valid_prefixes = ("oc_", "ou_", "ocb_", "oci_")
+            if not chat_id or chat_id.startswith(placeholder_prefixes) or (
+                chat_id and not chat_id.startswith(valid_prefixes)
+            ):
+                logger.info(
+                    "Skipping XiaoLiu call for placeholder/invalid chatId: %s", chat_id
+                )
+                return {
+                    "success": True,
+                    "data": {"result": "skipped (placeholder chat_id)"},
+                    "raw": None
                 }
+
+            payload = {
+                "message": prompt,
+                "chatId": chat_id,
+                "fromBot": from_bot
             }
+
+            if user_id:
+                payload["userId"] = user_id
+            if self.api_key:
+                payload["apiKey"] = self.api_key
 
             logger.info(f"Sending to XiaoLiu: {prompt[:100]}...")
 
@@ -70,7 +89,8 @@ class Bot2BotClient:
                 logger.info("XiaoLiu response received successfully")
                 return {
                     "success": True,
-                    "data": result
+                    "data": result.get("data", result),
+                    "raw": result
                 }
             else:
                 logger.error(f"XiaoLiu API error: {response.status_code}")

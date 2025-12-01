@@ -2,7 +2,11 @@
 """
 菜单管理器 - 管理AI初老师的交互菜单
 """
+import logging
+import re
 from typing import Optional, Dict
+
+logger = logging.getLogger(__name__)
 
 
 class MenuManager:
@@ -62,11 +66,31 @@ class MenuManager:
         Returns:
             应用编号，无效时返回None
         """
+        logger.info(f"Parsing user choice: '{user_input}'")
+
         try:
-            choice = int(user_input.strip())
+            # 先去掉首尾空白
+            cleaned_input = (user_input or "").strip()
+            logger.debug(f"After strip: '{cleaned_input}'")
+
+            # 提取数字片段（处理“11”、“11@bot”、“11-扫雷”、“我选11”等形式）
+            digit_matches = re.findall(r'\d+', cleaned_input)
+            if not digit_matches:
+                raise ValueError("no digits found")
+
+            token = digit_matches[0][:2]  # 只取前两位数字
+            logger.debug(f"Extracted digit token: '{token}'")
+
+            choice = int(token)
+            logger.info(f"Parsed choice: {choice}")
+
             if choice in self.apps:
+                logger.info(f"Valid choice: {choice} -> {self.apps[choice]['name']}")
                 return choice
-        except (ValueError, AttributeError):
+            else:
+                logger.warning(f"Choice {choice} not found in apps")
+        except (ValueError, AttributeError) as e:
+            logger.warning(f"Failed to parse choice: {e}")
             pass
         return None
 

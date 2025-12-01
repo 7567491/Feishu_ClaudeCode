@@ -64,26 +64,25 @@ class AITeacherHandler:
                 logger.info(f"Created new session for user: {user_nickname} ({user_id})")
 
             # 增加消息计数
-            msg_count = self.session_manager.increment_message_count(user_id)
+            self.session_manager.increment_message_count(user_id)
+            parsed_choice = self.menu_manager.parse_choice(message)
 
-            # 判断是否为首次消息（显示菜单）
-            if msg_count == 1:
-                menu = self.menu_manager.generate_menu(user_nickname)
+            # 非9个编号 -> 返回完整菜单
+            if not parsed_choice:
                 self.session_manager.set_state(user_id, 'waiting_choice')
+                menu = self.menu_manager.generate_menu(user_nickname)
                 logger.info(f"Showing menu to user: {user_nickname}")
                 return menu
 
-            # 处理用户选择
-            if session['state'] == 'waiting_choice':
-                return self._handle_user_choice(
-                    user_id,
-                    user_nickname,
-                    message,
-                    chat_id
-                )
-
-            # 其他状态，显示提示
-            return "请先选择一个应用（输入两位数字，如：11、22、33）"
+            # 9个编号 -> 处理选择并返回对应提示词
+            self.session_manager.set_state(user_id, 'waiting_choice')
+            return self._handle_user_choice(
+                user_id,
+                user_nickname,
+                message,
+                chat_id,
+                app_id=parsed_choice
+            )
 
         except Exception as e:
             logger.error(f"Error handling message: {str(e)}")
@@ -94,7 +93,8 @@ class AITeacherHandler:
         user_id: str,
         user_nickname: str,
         choice_str: str,
-        chat_id: str
+        chat_id: str,
+        app_id: int = None
     ) -> str:
         """
         处理用户选择
@@ -109,14 +109,14 @@ class AITeacherHandler:
             回复内容
         """
         # 解析选择
-        app_id = self.menu_manager.parse_choice(choice_str)
+        app_id = app_id or self.menu_manager.parse_choice(choice_str)
         if not app_id:
-            return "无效的选择，请输入两位数字（如：11、22、33）"
+            return self.menu_manager.generate_menu(user_nickname)
 
         # 获取应用信息
         app_info = self.menu_manager.get_app_info(app_id)
         if not app_info:
-            return "未找到对应的应用，请重新选择"
+            return self.menu_manager.generate_menu(user_nickname)
 
         # 更新会话状态
         self.session_manager.set_selected_app(user_id, app_id, app_info)
@@ -161,15 +161,6 @@ class AITeacherHandler:
             self.project_manager.create_design_doc(project_dir, app_info['name'])
             self.project_manager.create_plan_doc(project_dir, app_info['name'])
 
-        # 生成Bot-to-Bot消息
-        bot_message = self.project_manager.generate_bot2bot_message(
-            user_nickname=user_nickname,
-            user_pinyin=user_pinyin,
-            app_id=app_id,
-            app_name=app_info['name'],
-            prompt=prompt
-        )
-
         # 发送给小六
         result = self.bot2bot_client.send_to_xiaoliu(
             prompt=prompt,
@@ -182,9 +173,10 @@ class AITeacherHandler:
             logger.info("Successfully sent task to XiaoLiu")
         else:
             logger.error(f"Failed to send to XiaoLiu: {result.get('error')}")
-            bot_message += f"\n\n⚠️ 发送给小六失败：{result.get('error')}"
+            prompt += f"\n\n⚠️ 发送给小六失败：{result.get('error')}"
 
-        return bot_message
+        # 直接回复对应提示词（前端/全栈两种Prompt之一）
+        return prompt
 
     def reset_session(self, user_id: str) -> bool:
         """

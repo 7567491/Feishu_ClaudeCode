@@ -1,0 +1,646 @@
+{
+  "version": "1.0.0",
+  "globalStatus": "running",
+  "pauseReason": null,
+  "currentTaskIndex": 0,
+  "lastRun": null,
+  "totalAttempts": 0,
+  "tasks": [
+    {
+      "id": "stage0-task0",
+      "stage": 0,
+      "title": "确认 Node.js >= 14, SDK 已安装",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage0-task1",
+      "stage": 0,
+      "title": "研究 `db.js` (credentialsDb), `claude-cli.js` (queryClaude), `projects.js` (addProjectManually)",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage0-task0"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage0-task2",
+      "stage": 0,
+      "title": "测试：`node feishu/test-feishu-ws.js`",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage0-task1"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": "npm test"
+    },
+    {
+      "id": "stage1-task0",
+      "stage": 1,
+      "title": "打开 `server/database/db.js`，在末尾添加表和索引",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage0-task0",
+        "stage0-task1",
+        "stage0-task2"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage1-task1",
+      "stage": 1,
+      "title": "实现 `feishuDb = { getSession, createSession, updateSessionActivity, getAllSessions, logMessage }`",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage1-task0"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage1-task2",
+      "stage": 1,
+      "title": "导出并重启服务检查",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage1-task1"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage2-task0",
+      "stage": 2,
+      "title": "创建 `server/lib/feishu-message-writer.js`",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage1-task0",
+        "stage1-task1",
+        "stage1-task2"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage2-task1",
+      "stage": 2,
+      "title": "实现 `send(data)` - 解析 queryClaude 输出，累积 buffer",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage2-task0"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage2-task2",
+      "stage": 2,
+      "title": "实现 `flushIfNeeded()` - 每 2000 字符或 3 秒触发",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage2-task1"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage2-task3",
+      "stage": 2,
+      "title": "实现 `flush()` - splitMessage 分片发送",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage2-task2"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage2-task4",
+      "stage": 2,
+      "title": "实现 `complete()` - flush + \"✅\"",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage2-task3"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage3-task0",
+      "stage": 3,
+      "title": "创建 `server/lib/feishu-client.js`",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage2-task0",
+        "stage2-task1",
+        "stage2-task2",
+        "stage2-task3",
+        "stage2-task4"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage3-task1",
+      "stage": 3,
+      "title": "实现构造函数、`start(messageHandler)`、`isMessageForBot(event)`",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage3-task0"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage3-task2",
+      "stage": 3,
+      "title": "实现 `sendTextMessage(chatId, text, retries=3)`",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage3-task1"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage3-task3",
+      "stage": 3,
+      "title": "测试：启动并发送消息",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage3-task2"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": "npm test"
+    },
+    {
+      "id": "stage4-task0",
+      "stage": 4,
+      "title": "创建 `server/lib/feishu-session.js`",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage3-task0",
+        "stage3-task1",
+        "stage3-task2",
+        "stage3-task3"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage4-task1",
+      "stage": 4,
+      "title": "实现 `getConversationId(event)` - 返回 user-xxx 或 group-xxx",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage4-task0"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage4-task2",
+      "stage": 4,
+      "title": "实现 `getOrCreateSession(event)` - 查询 → 创建目录 + git init + addProjectManually + 写数据库",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage4-task1"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage4-task3",
+      "stage": 4,
+      "title": "实现 `isSessionBusy(session)` - 调用 isClaudeSessionActive",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage4-task2"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage4-task4",
+      "stage": 4,
+      "title": "测试：模拟事件，检查目录和数据库",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage4-task3"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": "npm test"
+    },
+    {
+      "id": "stage5-task0",
+      "stage": 5,
+      "title": "创建 `server/feishu-ws.js`",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage4-task0",
+        "stage4-task1",
+        "stage4-task2",
+        "stage4-task3",
+        "stage4-task4"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage5-task1",
+      "stage": 5,
+      "title": "实现 `loadConfig()` - 从 credentialsDb 获取凭证",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage5-task0"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage5-task2",
+      "stage": 5,
+      "title": "实现 `start()` - loadConfig → FeishuClient → 启动连接",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage5-task1"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage5-task3",
+      "stage": 5,
+      "title": "实现 `handleMessage(event, userText)`:",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage5-task2"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage5-task4",
+      "stage": 5,
+      "title": "实现 `getStatus()`, `stop()`, 主程序入口, SIGINT/SIGTERM",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage5-task3"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage5-task5",
+      "stage": 5,
+      "title": "测试：`node server/feishu-ws.js`，飞书发送消息",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage5-task4"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": "npm test"
+    },
+    {
+      "id": "stage6-task0",
+      "stage": 6,
+      "title": "创建 `server/routes/feishu.js`",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage5-task0",
+        "stage5-task1",
+        "stage5-task2",
+        "stage5-task3",
+        "stage5-task4",
+        "stage5-task5"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage6-task1",
+      "stage": 6,
+      "title": "实现：`GET /status`, `POST /start|stop`, `GET /sessions`, `DELETE /sessions/:id`, `GET /stats`, `GET /health`",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage6-task0"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage6-task2",
+      "stage": 6,
+      "title": "导出 router",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage6-task1"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage7-task0",
+      "stage": 7,
+      "title": "修改 `server/index.js` - 导入并挂载 `/api/feishu` 路由",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage6-task0",
+        "stage6-task1",
+        "stage6-task2"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage7-task1",
+      "stage": 7,
+      "title": "修改 `package.json` - 添加 `\"feishu\": \"node server/feishu-ws.js\"`",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage7-task0"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage8-task0",
+      "stage": 8,
+      "title": "启动服务：`npm run feishu`",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage7-task0",
+        "stage7-task1"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage8-task1",
+      "stage": 8,
+      "title": "测试私聊、群聊@、会话隔离、并发控制、长消息分片",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage8-task0"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": "npm test"
+    },
+    {
+      "id": "stage8-task2",
+      "stage": 8,
+      "title": "测试 Web UI 项目列表、REST API",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage8-task1"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": "npm test"
+    },
+    {
+      "id": "stage8-task3",
+      "stage": 8,
+      "title": "检查数据库表",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage8-task2"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage8-task4",
+      "stage": 8,
+      "title": "私聊和群聊@正常响应",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage8-task3"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage8-task5",
+      "stage": 8,
+      "title": "会话隔离正确",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage8-task4"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage8-task6",
+      "stage": 8,
+      "title": "长消息分片、并发控制有效",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage8-task5"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage8-task7",
+      "stage": 8,
+      "title": "飞书项目在 Web UI 可见",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage8-task6"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage8-task8",
+      "stage": 8,
+      "title": "数据库表正确、REST API 正常",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage8-task7"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    },
+    {
+      "id": "stage8-task9",
+      "stage": 8,
+      "title": "优雅启动和关闭",
+      "description": "",
+      "status": "pending",
+      "retryCount": 0,
+      "dependencies": [
+        "stage8-task8"
+      ],
+      "attempts": [],
+      "lastError": null,
+      "completedAt": null,
+      "verificationScript": null
+    }
+  ]
+}

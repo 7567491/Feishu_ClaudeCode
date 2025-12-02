@@ -1,0 +1,38 @@
+{
+  "name": "auto-devops-agent",
+  "version": "1.0.0",
+  "description": "全自动化运维工程师 - 智能项目巡检与修复系统",
+  "type": "module",
+  "main": "agent.js",
+  "scripts": {
+    "start": "node agent.js",
+    "dev": "node --watch agent.js",
+    "test": "node --test",
+    "pm2:start": "pm2 start agent.js --name devops-agent",
+    "pm2:stop": "pm2 stop devops-agent",
+    "pm2:restart": "pm2 restart devops-agent",
+    "pm2:logs": "pm2 logs devops-agent"
+  },
+  "keywords": [
+    "devops",
+    "automation",
+    "monitoring",
+    "health-check",
+    "auto-fix"
+  ],
+  "author": "Auto DevOps Team",
+  "license": "MIT",
+  "dependencies": {
+    "node-cron": "^3.0.3",
+    "systeminformation": "^5.21.20",
+    "axios": "^1.6.2",
+    "better-sqlite3": "^9.2.2",
+    "winston": "^3.11.0",
+    "winston-daily-rotate-file": "^4.7.1",
+    "glob": "^10.3.10"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

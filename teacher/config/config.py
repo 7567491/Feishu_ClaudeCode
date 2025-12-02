@@ -10,14 +10,16 @@ class Config:
     """配置类"""
 
     # 飞书应用配置
-    FEISHU_APP_ID = os.getenv("FeishuT_App_ID", "")
-    FEISHU_APP_SECRET = os.getenv("FeishuT_App_Secret", "")
+    FEISHU_APP_ID = os.getenv("Feishu_Teacher_App_ID", "")
+    FEISHU_APP_SECRET = os.getenv("Feishu_Teacher_App_Secret", "")
+    FEISHU_VERIFICATION_TOKEN = os.getenv("Feishu_Teacher_Verification_Token", "qnLh16WnNOvTYOYex1vKdhh4kHdcG2DY")
+    BOT_NAME = os.getenv("TEACHER_BOT_NAME", "AI初老师")
 
     # AI初老师群组
     DEFAULT_GROUP_ID = os.getenv("TEACHER_GROUP_ID", "oc_15a90daa813d981076ffa50c0de0b5e4")
 
     # 小六服务配置
-    XIAOLIU_API_URL = os.getenv("XIAOLIU_API_URL", "http://localhost:3011/api/feishu-proxy/query")
+    XIAOLIU_API_URL = os.getenv("XIAOLIU_API_URL", "http://localhost:33300/api/feishu-proxy/query")
     XIAOLIU_API_KEY = os.getenv("XIAOLIU_API_KEY", "")
 
     # 服务器配置
@@ -63,8 +65,8 @@ class Config:
         if not cls.FEISHU_APP_ID or not cls.FEISHU_APP_SECRET:
             print("❌ 错误：未配置飞书应用凭据")
             print("请设置环境变量：")
-            print("  export FeishuT_App_ID='your_app_id'")
-            print("  export FeishuT_App_Secret='your_app_secret'")
+            print("  export Feishu_Teacher_App_ID='your_app_id'")
+            print("  export Feishu_Teacher_App_Secret='your_app_secret'")
             return False
 
         return True

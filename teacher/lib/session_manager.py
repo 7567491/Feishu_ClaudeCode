@@ -4,15 +4,36 @@
 """
 from typing import Dict, Optional
 from datetime import datetime
+import json
+import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class SessionManager:
     """会话管理器"""
 
-    def __init__(self):
-        """初始化会话管理器"""
+    def __init__(self, session_file: str = None):
+        """初始化会话管理器
+
+        Args:
+            session_file: 会话持久化文件路径，默认为teacher/sessions.json
+        """
         # 会话存储: {user_id: session_data}
         self.sessions = {}
+
+        # 会话文件路径
+        if session_file is None:
+            self.session_file = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                'sessions.json'
+            )
+        else:
+            self.session_file = session_file
+
+        # 加载已存在的会话
+        self._load_sessions()
 
     def create_session(self, user_id: str, user_nickname: str) -> Dict:
         """
@@ -35,6 +56,7 @@ class SessionManager:
             'message_count': 0
         }
         self.sessions[user_id] = session
+        self._save_sessions()  # 保存到文件
         return session
 
     def get_session(self, user_id: str) -> Optional[Dict]:
@@ -63,6 +85,7 @@ class SessionManager:
         if user_id in self.sessions:
             self.sessions[user_id].update(updates)
             self.sessions[user_id]['last_activity'] = datetime.now().isoformat()
+            self._save_sessions()  # 保存到文件
             return True
         return False
 
@@ -125,8 +148,11 @@ class SessionManager:
         if user_id in self.sessions:
             self.sessions[user_id]['message_count'] = \
                 self.sessions[user_id].get('message_count', 0) + 1
+            self.sessions[user_id]['last_activity'] = datetime.now().isoformat()
+            self._save_sessions()  # 保存到文件
             return self.sessions[user_id]['message_count']
-        return 0
+        # 会话不存在时返回1，表示这是第一条消息
+        return 1
 
     def clear_session(self, user_id: str) -> bool:
         """
@@ -140,6 +166,7 @@ class SessionManager:
         """
         if user_id in self.sessions:
             del self.sessions[user_id]
+            self._save_sessions()  # 保存到文件
             return True
         return False
 
@@ -151,3 +178,29 @@ class SessionManager:
             所有会话数据
         """
         return self.sessions.copy()
+
+    def _load_sessions(self):
+        """从文件加载会话数据"""
+        if os.path.exists(self.session_file):
+            try:
+                with open(self.session_file, 'r', encoding='utf-8') as f:
+                    self.sessions = json.load(f)
+                logger.info(f"Loaded {len(self.sessions)} sessions from {self.session_file}")
+            except Exception as e:
+                logger.error(f"Failed to load sessions: {e}")
+                self.sessions = {}
+        else:
+            logger.info("No existing session file, starting with empty sessions")
+
+    def _save_sessions(self):
+        """保存会话数据到文件"""
+        try:
+            # 创建目录（如果不存在）
+            os.makedirs(os.path.dirname(self.session_file), exist_ok=True)
+
+            # 保存会话数据
+            with open(self.session_file, 'w', encoding='utf-8') as f:
+                json.dump(self.sessions, f, ensure_ascii=False, indent=2)
+            logger.debug(f"Saved {len(self.sessions)} sessions to {self.session_file}")
+        except Exception as e:
+            logger.error(f"Failed to save sessions: {e}")

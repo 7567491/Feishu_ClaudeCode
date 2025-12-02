@@ -20,12 +20,13 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useParams } from 'react-router-dom';
-import { Settings as SettingsIcon, Sparkles } from 'lucide-react';
+import { Settings as SettingsIcon, Sparkles, X } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import MainContent from './components/MainContent';
 import MobileNav from './components/MobileNav';
 import Settings from './components/Settings';
 import QuickSettingsPanel from './components/QuickSettingsPanel';
+import UserManagement from './components/UserManagement';
 
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
@@ -57,6 +58,7 @@ function AppContent() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState('tools');
   const [showQuickSettings, setShowQuickSettings] = useState(false);
+  const [showUserManagement, setShowUserManagement] = useState(false);
   const [autoExpandTools, setAutoExpandTools] = useLocalStorage('autoExpandTools', false);
   const [showRawParameters, setShowRawParameters] = useLocalStorage('showRawParameters', false);
   const [showThinking, setShowThinking] = useLocalStorage('showThinking', true);
@@ -762,6 +764,7 @@ function AppContent() {
                 isLoading={isLoadingProjects}
                 onRefresh={handleSidebarRefresh}
                 onShowSettings={() => setShowSettings(true)}
+                onShowUserManagement={() => setShowUserManagement(true)}
                 updateAvailable={updateAvailable}
                 latestVersion={latestVersion}
                 currentVersion={currentVersion}
@@ -856,6 +859,7 @@ function AppContent() {
               isLoading={isLoadingProjects}
               onRefresh={handleSidebarRefresh}
               onShowSettings={() => setShowSettings(true)}
+              onShowUserManagement={() => setShowUserManagement(true)}
               updateAvailable={updateAvailable}
               latestVersion={latestVersion}
               currentVersion={currentVersion}
@@ -935,6 +939,26 @@ function AppContent() {
         projects={projects}
         initialTab={settingsInitialTab}
       />
+
+      {/* User Management Modal */}
+      {showUserManagement && (
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm">
+          <div className="fixed inset-x-4 inset-y-4 md:inset-10 bg-background border border-border rounded-xl shadow-xl overflow-hidden">
+            <div className="h-full overflow-auto">
+              <div className="sticky top-0 bg-background border-b border-border p-4 flex justify-between items-center">
+                <h2 className="text-xl font-semibold">User Management</h2>
+                <button
+                  onClick={() => setShowUserManagement(false)}
+                  className="p-2 hover:bg-accent rounded-md"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <UserManagement />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Version Upgrade Modal */}
       <VersionUpgradeModal />

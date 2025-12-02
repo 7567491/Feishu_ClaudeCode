@@ -8,6 +8,7 @@ import requests
 import json
 import time
 import logging
+import os
 from typing import Dict, Any, Optional
 
 # 配置日志
@@ -33,7 +34,11 @@ class FeishuClient:
         # API endpoints
         self.auth_url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
         self.message_url = "https://open.feishu.cn/open-apis/im/v1/messages"
-        self.xiaoliu_api_url = "http://localhost:3011/api/feishu-proxy/query"  # 小六API地址
+        self.xiaoliu_api_url = os.getenv(
+            "XIAOLIU_API_URL",
+            "http://localhost:33300/api/feishu-proxy/query"
+        )  # 小六API地址
+        self.member_cache = {}
 
     def get_access_token(self) -> str:
         """
@@ -60,8 +65,9 @@ class FeishuClient:
 
             if data.get("code") == 0:
                 self.access_token = data.get("tenant_access_token")
-                # Token通常2小时过期，这里设置为1.5小时
-                self.token_expire_time = time.time() + 5400
+                # Token通常2小时过期，预留缓冲
+                expire_in = data.get("expire", 5400)
+                self.token_expire_time = time.time() + expire_in - 120
                 logger.info("Successfully obtained Feishu access token")
                 return self.access_token
             else:
@@ -71,6 +77,70 @@ class FeishuClient:
         except Exception as e:
             logger.error(f"Error getting access token: {str(e)}")
             raise
+
+    def get_chat_members(self, chat_id: str, force_refresh: bool = False) -> Dict[str, str]:
+        """
+        获取群成员信息并缓存
+
+        Args:
+            chat_id: 群聊ID
+            force_refresh: 是否强制刷新缓存
+
+        Returns:
+            {open_id: name} 字典
+        """
+        if not chat_id:
+            return {}
+
+        cache_entry = self.member_cache.get(chat_id)
+        if cache_entry and not force_refresh and time.time() - cache_entry.get("ts", 0) < 1800:
+            return cache_entry.get("members", {})
+
+        try:
+            token = self.get_access_token()
+            members: Dict[str, str] = {}
+            page_token = None
+
+            while True:
+                params = {
+                    "member_id_type": "open_id",
+                    "page_size": 200
+                }
+                if page_token:
+                    params["page_token"] = page_token
+
+                resp = requests.get(
+                    f"https://open.feishu.cn/open-apis/im/v1/chats/{chat_id}/members",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params=params,
+                    timeout=8
+                )
+                data = resp.json()
+                if data.get("code") != 0:
+                    logger.error(f"Failed to fetch members for {chat_id}: {data}")
+                    break
+
+                items = data.get("data", {}).get("items", [])
+                for item in items:
+                    open_id = item.get("member_id")
+                    name = item.get("name") or open_id
+                    if open_id:
+                        members[open_id] = name
+
+                if not data.get("data", {}).get("has_more"):
+                    break
+                page_token = data.get("data", {}).get("page_token")
+
+            if members:
+                self.member_cache[chat_id] = {
+                    "members": members,
+                    "ts": time.time()
+                }
+            return members
+
+        except Exception as e:
+            logger.error(f"Error fetching chat members: {str(e)}")
+            return {}
 
     def send_text_message(self, chat_id: str, content: str) -> bool:
         """
@@ -84,11 +154,11 @@ class FeishuClient:
             是否发送成功
         """
         try:
-            # 如果没有token才获取
-            if not self.access_token:
-                token = self.get_access_token()
-            else:
+            # 优先使用缓存token
+            if self.access_token and (self.token_expire_time == 0 or time.time() < self.token_expire_time):
                 token = self.access_token
+            else:
+                token = self.get_access_token()
 
             # 确定接收者类型
             receive_id_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
@@ -119,6 +189,52 @@ class FeishuClient:
             logger.error(f"Error sending message: {str(e)}")
             return False
 
+    def get_user_nickname(self, open_id: str, chat_id: Optional[str] = None) -> str:
+        """
+        获取用户昵称（优先从群成员列表获取，失败时返回open_id）
+        """
+        if not open_id:
+            return open_id
+
+        # 优先从群成员缓存或最新列表获取（适用于跨租户）
+        if chat_id:
+            cached_members = self.get_chat_members(chat_id)
+            cached_name = cached_members.get(open_id)
+            if cached_name:
+                return cached_name
+
+            refreshed_members = self.get_chat_members(chat_id, force_refresh=True)
+            refreshed_name = refreshed_members.get(open_id)
+            if refreshed_name:
+                return refreshed_name
+
+        # 回退到通讯录接口（仅同租户可用）
+        try:
+            token = self.get_access_token()
+            response = requests.get(
+                f"https://open.feishu.cn/open-apis/contact/v3/users/{open_id}",
+                params={"user_id_type": "open_id"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                },
+                timeout=5
+            )
+
+            data = response.json()
+            if response.status_code == 200 and data.get("code") == 0:
+                user = data.get("data", {}).get("user", {})
+                nickname = user.get("name") or user.get("nickname")
+                if nickname:
+                    return nickname
+                logger.warning(f"Nickname not found for user {open_id}")
+            else:
+                logger.error(f"Failed to fetch user info for {open_id}: {data}")
+        except Exception as e:
+            logger.error(f"Error fetching user nickname: {str(e)}")
+
+        return open_id
+
     def send_card_message(self, chat_id: str, card: Dict[str, Any]) -> bool:
         """
         发送卡片消息到飞书群组或用户
@@ -132,10 +248,10 @@ class FeishuClient:
         """
         try:
             # 如果没有token才获取
-            if not self.access_token:
-                token = self.get_access_token()
-            else:
+            if self.access_token and (self.token_expire_time == 0 or time.time() < self.token_expire_time):
                 token = self.access_token
+            else:
+                token = self.get_access_token()
 
             # 确定接收者类型
             receive_id_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
@@ -188,6 +304,7 @@ class FeishuClient:
             }
 
             # 如果提供了API密钥，添加到请求中
+            api_key = api_key or os.getenv("XIAOLIU_API_KEY")
             if api_key:
                 payload["apiKey"] = api_key
 

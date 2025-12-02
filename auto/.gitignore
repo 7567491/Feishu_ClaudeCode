@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Database files
+data/*.db
+data/*.db-journal
+
+# Logs
+logs/*.log
+
+# Environment variables
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# PM2
+.pm2/
+
+# Knowledge base (contains learned data)
+data/knowledge.json

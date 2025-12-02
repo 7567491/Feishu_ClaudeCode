@@ -218,6 +218,11 @@ async function handleMessageEvent(data) {
             });
           }
 
+          // Log member types for debugging
+          const userCount = members.filter(m => m.member_type === 'user').length;
+          const botCount = members.filter(m => m.member_type === 'app').length;
+          console.log(`[FeishuWebhook] Member breakdown: ${userCount} users, ${botCount} bots/apps`);
+
           console.log(`[FeishuWebhook] Cached ${members.length} members for group ${chatId}`);
         } else {
           console.log(`[FeishuWebhook] Using cached group members (${cachedMembers.length} members, age: ${Math.round(cacheAge)}s)`);
@@ -269,56 +274,95 @@ async function handleMessageEvent(data) {
       console.log('  Mentions count:', mentions.length);
       console.log('  Mentions details:', JSON.stringify(mentions, null, 2));
 
-      if (mentions.length === 0 && !isSendMdCommand) {
+      // 🎯 特殊处理：检查是否为张璐的单人群聊
+      // 获取群成员统计信息（从缓存读取，性能很好）
+      const memberStats = feishuDb.getGroupMemberStats(chatId);
+      const cachedMembers = feishuDb.getGroupMembers(chatId);
+
+      // 判断是否为单用户群聊（1个用户 + 机器人）
+      let isSingleUserGroup = false;
+      let isZhangLuGroup = false;
+
+      if (memberStats) {
+        console.log(`[FeishuWebhook] Group member stats: users=${memberStats.user_count}, bots=${memberStats.bot_count}`);
+
+        // 检查是否只有一个用户（可能有一个或多个机器人）
+        if (memberStats.user_count === 1) {
+          // 获取唯一的用户信息
+          const userMember = cachedMembers.find(m => m.member_type === 'user' || !m.member_type);
+          if (userMember) {
+            console.log(`[FeishuWebhook] Single user detected: ${userMember.member_name || userMember.member_open_id}`);
+
+            // 判断是否为张璐（支持多种名称格式）
+            const memberName = userMember.member_name || '';
+            if (memberName === '张璐' ||
+                memberName.includes('张璐') ||
+                memberName === 'zhanglu' ||
+                memberName.toLowerCase().includes('zhang') && memberName.toLowerCase().includes('lu')) {
+              isSingleUserGroup = true;
+              isZhangLuGroup = true;
+              console.log('[FeishuWebhook] ✨ 张璐专属群聊模式激活 - 无需@即可对话');
+            }
+          }
+        }
+      }
+
+      // 如果是张璐的单人群聊，跳过@检查，直接处理消息
+      if (isSingleUserGroup && isZhangLuGroup) {
+        console.log('[FeishuWebhook] 📍 Auto-processing message from 张璐 (no @ required)');
+        // 不return，继续处理消息
+      } else if (mentions.length === 0 && !isSendMdCommand) {
+        // 非张璐专属群聊，仍需要@
         console.log('[FeishuWebhook] Group message without mention, skipping');
         return;
+      } else {
+        // 有@的情况，检查是否@了当前机器人
+        // 🔧 Fix: Check if THIS bot was mentioned (not just any bot)
+        // In multi-bot groups, only respond when explicitly mentioned
+        let isMentioned = false;
+
+        for (const mention of mentions) {
+          console.log('  Checking mention:', JSON.stringify(mention, null, 2));
+
+          // Check multiple fields to determine if this bot was mentioned
+          // Method 1: Check if mention key contains bot name (从配置或环境变量读取)
+          const botName = process.env.FeishuCC_Bot_Name || '小六'; // 可配置机器人名称
+          if (mention.key && mention.key.includes(botName)) {
+            console.log(`  ✅ Bot "${botName}" was mentioned via key`);
+            isMentioned = true;
+            break;
+          }
+
+          // Method 2: Check if mention name matches bot name
+          if (mention.name && mention.name.includes(botName)) {
+            console.log(`  ✅ Bot "${botName}" was mentioned via name`);
+            isMentioned = true;
+            break;
+          }
+
+          // Method 3: Check if it's @all
+          if (mention.key === '@_all') {
+            console.log('  ✅ @all mention detected');
+            isMentioned = true;
+            break;
+          }
+
+          // Method 4: Check by app_id if available
+          if (botOpenId && mention.id?.app_id === botOpenId) {
+            console.log('  ✅ Bot mentioned via app_id');
+            isMentioned = true;
+            break;
+          }
+        }
+
+        if (!isMentioned && !isSendMdCommand) {
+          console.log('[FeishuWebhook] ❌ This bot was NOT mentioned, skipping');
+          console.log('[FeishuWebhook] (Another bot in the group was mentioned)');
+          return;
+        }
+
+        console.log('[FeishuWebhook] ✅ This bot WAS mentioned, processing message');
       }
-
-      // 🔧 Fix: Check if THIS bot was mentioned (not just any bot)
-      // In multi-bot groups, only respond when explicitly mentioned
-      let isMentioned = false;
-
-      for (const mention of mentions) {
-        console.log('  Checking mention:', JSON.stringify(mention, null, 2));
-
-        // Check multiple fields to determine if this bot was mentioned
-        // Method 1: Check if mention key contains bot name (从配置或环境变量读取)
-        const botName = process.env.FeishuCC_Bot_Name || '小六'; // 可配置机器人名称
-        if (mention.key && mention.key.includes(botName)) {
-          console.log(`  ✅ Bot "${botName}" was mentioned via key`);
-          isMentioned = true;
-          break;
-        }
-
-        // Method 2: Check if mention name matches bot name
-        if (mention.name && mention.name.includes(botName)) {
-          console.log(`  ✅ Bot "${botName}" was mentioned via name`);
-          isMentioned = true;
-          break;
-        }
-
-        // Method 3: Check if it's @all
-        if (mention.key === '@_all') {
-          console.log('  ✅ @all mention detected');
-          isMentioned = true;
-          break;
-        }
-
-        // Method 4: Check by app_id if available
-        if (botOpenId && mention.id?.app_id === botOpenId) {
-          console.log('  ✅ Bot mentioned via app_id');
-          isMentioned = true;
-          break;
-        }
-      }
-
-      if (!isMentioned && !isSendMdCommand) {
-        console.log('[FeishuWebhook] ❌ This bot was NOT mentioned, skipping');
-        console.log('[FeishuWebhook] (Another bot in the group was mentioned)');
-        return;
-      }
-
-      console.log('[FeishuWebhook] ✅ This bot WAS mentioned, processing message');
     }
 
     // Remove @mentions for final processing
@@ -448,6 +492,56 @@ async function handleMessageEvent(data) {
         return;
       }
     }
+
+    // Check if this is a document edit command
+    const { FeishuDocEditor } = await import('./lib/feishu-doc-editor.js');
+    const { database } = await import('./database/db.js');
+
+    if (!global.docEditor) {
+      global.docEditor = new FeishuDocEditor(feishuClient, database);
+      // Restore active sessions on startup
+      await global.docEditor.restoreSessions();
+    }
+
+    const editCommand = global.docEditor.parseEditCommand(userText);
+    if (editCommand) {
+      console.log('[FeishuWebhook] Document edit command detected:', editCommand);
+
+      if (editCommand.command === 'edit' && editCommand.fileName) {
+        // Find the file in project directory
+        const filePath = FeishuFileHandler.findFile(actualWorkingDir, editCommand.fileName);
+
+        if (filePath) {
+          const result = await global.docEditor.startEditSession(chatId, filePath, senderId);
+          await sendMessage(chatId, result.message);
+        } else {
+          await sendMessage(chatId, `❌ 找不到文件：${editCommand.fileName}\n请确保文件存在且扩展名为 .md`);
+        }
+
+        feishuDb.updateSessionActivity(session.id);
+        return;
+      } else if (editCommand.command === 'stop_edit') {
+        const activeSession = global.docEditor.findSessionByChat(chatId);
+        if (activeSession) {
+          const result = await global.docEditor.stopEditSession(activeSession.sessionId);
+          await sendMessage(chatId, result.message);
+        } else {
+          await sendMessage(chatId, '当前没有活跃的编辑会话');
+        }
+
+        feishuDb.updateSessionActivity(session.id);
+        return;
+      } else if (editCommand.command === 'edit_status') {
+        const status = await global.docEditor.getEditStatus(chatId);
+        await sendMessage(chatId, status);
+
+        feishuDb.updateSessionActivity(session.id);
+        return;
+      }
+    }
+
+    // 立即发送简单的确认消息，提升用户体验
+    await sendMessage(chatId, '收到');
 
     // Create message writer
     const writer = new FeishuMessageWriter(

@@ -8,6 +8,7 @@
 import chokidar from 'chokidar';
 import path from 'path';
 import fs from 'fs';
+import { fileCache } from './feishu-file-cache.js';
 
 export class FeishuFileWatcher {
   constructor(watchPath, options = {}) {

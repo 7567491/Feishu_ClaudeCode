@@ -1,0 +1,33 @@
+{
+  "name": "feishu-bull-automation",
+  "version": "1.0.0",
+  "description": "Bull queue system for Feishu automation tasks",
+  "main": "index.js",
+  "scripts": {
+    "start": "node worker.js",
+    "dashboard": "node dashboard.js",
+    "dev": "concurrently \"node worker.js\" \"node dashboard.js\"",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop ecosystem.config.js",
+    "pm2:restart": "pm2 restart ecosystem.config.js",
+    "pm2:logs": "pm2 logs",
+    "status": "node cli.js status",
+    "add": "node cli.js add",
+    "clean": "node cli.js clean"
+  },
+  "keywords": ["bull", "queue", "automation", "feishu"],
+  "author": "Auto Dev System",
+  "license": "MIT",
+  "dependencies": {
+    "bull": "^4.12.0",
+    "express": "^4.18.2",
+    "redis": "^4.6.0",
+    "@bull-board/express": "^5.10.0",
+    "@bull-board/api": "^5.10.0",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

@@ -1,0 +1,68 @@
+server {
+    server_name teacher.linapp.fun;
+
+    # 日志配置
+    access_log /var/log/nginx/teacher.linapp.fun.access.log;
+    error_log /var/log/nginx/teacher.linapp.fun.error.log;
+
+    # 安全头部
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    # 反向代理到AI初老师飞书机器人服务
+    # 处理飞书webhook（路径映射）
+    location /webhook {
+        proxy_pass http://127.0.0.1:33301/webhook/feishu;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 飞书webhook需要的头部
+        proxy_set_header Content-Type "application/json";
+
+        # 超时设置
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+    }
+
+    # 健康检查路径
+    location /health {
+        proxy_pass http://127.0.0.1:33301/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
+    # 其他请求转发到主服务
+    location / {
+        proxy_pass http://127.0.0.1:33301;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 超时设置
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+    }
+
+    listen 443 ssl;
+    ssl_certificate /etc/letsencrypt/live/linapp.fun/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/linapp.fun/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+}
+
+server {
+    if ($host = teacher.linapp.fun) {
+        return 301 https://$host$request_uri;
+    }
+
+    listen 80;
+    server_name teacher.linapp.fun;
+    return 404;
+}

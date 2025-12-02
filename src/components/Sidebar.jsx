@@ -5,7 +5,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 
-import { FolderOpen, Folder, Plus, MessageSquare, Clock, ChevronDown, ChevronRight, Edit3, Check, X, Trash2, Settings, FolderPlus, RefreshCw, Sparkles, Edit2, Star, Search } from 'lucide-react';
+import { FolderOpen, Folder, Plus, MessageSquare, Clock, ChevronDown, ChevronRight, Edit3, Check, X, Trash2, Settings, FolderPlus, RefreshCw, Sparkles, Edit2, Star, Search, Users } from 'lucide-react';
 import { cn } from '../lib/utils';
 import ClaudeLogo from './ClaudeLogo';
 import CursorLogo from './CursorLogo.jsx';
@@ -14,6 +14,7 @@ import ProjectCreationWizard from './ProjectCreationWizard';
 import { api } from '../utils/api';
 import { useTaskMaster } from '../contexts/TaskMasterContext';
 import { useTasksSettings } from '../contexts/TasksSettingsContext';
+import { useAuth } from '../contexts/AuthContext';
 
 // Move formatTimeAgo outside component to avoid recreation on every render
 const formatTimeAgo = (dateString, currentTime) => {
@@ -53,6 +54,7 @@ function Sidebar({
   isLoading,
   onRefresh,
   onShowSettings,
+  onShowUserManagement,
   updateAvailable,
   latestVersion,
   currentVersion,
@@ -80,6 +82,9 @@ function Sidebar({
   // TaskMaster context
   const { setCurrentProject, mcpServerStatus } = useTaskMaster();
   const { tasksEnabled } = useTasksSettings();
+
+  // Auth context
+  const { user } = useAuth();
 
   
   // Starred projects state - persisted in localStorage
@@ -1346,7 +1351,18 @@ function Sidebar({
       {/* Settings Section */}
       <div className="md:p-2 md:border-t md:border-border flex-shrink-0">
         {/* Mobile Settings */}
-        <div className="md:hidden p-4 pb-20 border-t border-border/50">
+        <div className="md:hidden p-4 pb-20 border-t border-border/50 space-y-3">
+          {user?.role === 'admin' && (
+            <button
+              className="w-full h-14 bg-muted/50 hover:bg-muted/70 rounded-2xl flex items-center justify-start gap-4 px-4 active:scale-[0.98] transition-all duration-150"
+              onClick={onShowUserManagement}
+            >
+              <div className="w-10 h-10 rounded-2xl bg-background/80 flex items-center justify-center">
+                <Users className="w-5 h-5 text-muted-foreground" />
+              </div>
+              <span className="text-lg font-medium text-foreground">User Management</span>
+            </button>
+          )}
           <button
             className="w-full h-14 bg-muted/50 hover:bg-muted/70 rounded-2xl flex items-center justify-start gap-4 px-4 active:scale-[0.98] transition-all duration-150"
             onClick={onShowSettings}
@@ -1358,6 +1374,18 @@ function Sidebar({
           </button>
         </div>
         
+        {/* Desktop User Management (Admin only) */}
+        {user?.role === 'admin' && (
+          <Button
+            variant="ghost"
+            className="hidden md:flex w-full justify-start gap-2 p-2 h-auto font-normal text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-200"
+            onClick={onShowUserManagement}
+          >
+            <Users className="w-3 h-3" />
+            <span className="text-xs">User Management</span>
+          </Button>
+        )}
+
         {/* Desktop Settings */}
         <Button
           variant="ghost"

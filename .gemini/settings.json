@@ -1,0 +1,14 @@
+{
+  "general": {
+    "disableAutoUpdate": true,
+    "disableUpdateNag": true
+  },
+  "security": {
+    "auth": {
+      "selectedType": "oauth-personal"
+    }
+  },
+  "experimental": {
+    "useModelRouter": false
+  }
+}

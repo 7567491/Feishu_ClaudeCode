@@ -1014,10 +1014,38 @@ export class FeishuClient {
 
           // Extract member info
           for (const item of items) {
+            // Determine member type based on available fields
+            let memberType = 'user'; // Default to user
+
+            // Check if it's a bot/app based on various indicators
+            if (item.member_type) {
+              // If API provides member_type, use it directly
+              memberType = item.member_type;
+              console.log(`[FeishuClient] Member ${item.name}: using API member_type = ${memberType}`);
+            } else if (item.user_type) {
+              // Some API versions use user_type
+              memberType = item.user_type === 'app' ? 'app' : 'user';
+              console.log(`[FeishuClient] Member ${item.name}: using user_type = ${memberType}`);
+            } else if (item.is_bot || item.is_app) {
+              // Check boolean flags if available
+              memberType = 'app';
+              console.log(`[FeishuClient] Member ${item.name}: detected as bot via flags`);
+            } else if (item.name) {
+              // Fallback: identify known bots by name
+              const botNames = ['小六', 'AI初老师', 'Melody', 'AI助手', 'Claude'];
+              if (botNames.some(bot => item.name.includes(bot))) {
+                memberType = 'app';
+                console.log(`[FeishuClient] Member ${item.name}: identified as bot by name`);
+              } else {
+                console.log(`[FeishuClient] Member ${item.name}: defaulting to user (no bot indicators)`);
+              }
+            }
+
             const member = {
               open_id: item.member_id,
               name: item.name || null,
-              tenant_key: item.tenant_key || null
+              tenant_key: item.tenant_key || null,
+              member_type: memberType
             };
             members.push(member);
           }

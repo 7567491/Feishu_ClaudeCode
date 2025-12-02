@@ -73,7 +73,7 @@ check_env() {
 
     # 设置小六API地址
     if [ -z "$XIAOLIU_API_URL" ]; then
-        export XIAOLIU_API_URL="http://localhost:3011/api/feishu-proxy/query"
+        export XIAOLIU_API_URL="http://localhost:33300/api/feishu-proxy/query"
         print_info "Using default Xiaoliu API URL: $XIAOLIU_API_URL"
     fi
 }
@@ -96,8 +96,8 @@ stop_service() {
 start_service() {
     print_info "Starting AI初老师 service..."
 
-    # 后台启动
-    nohup $PYTHON_CMD main.py > $LOG_FILE 2>&1 &
+    # 后台启动（入口改为 app.py）
+    nohup $PYTHON_CMD app.py > $LOG_FILE 2>&1 &
     PID=$!
 
     # 等待服务启动

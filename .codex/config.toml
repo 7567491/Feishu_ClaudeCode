@@ -1,0 +1,12 @@
+model_provider = "codex"
+model = "gpt-5.1-codex-max"
+model_reasoning_effort = "medium"
+
+
+[model_providers.codex]
+name = "codex"
+base_url = "https://gaccode.com/codex/v1"
+wire_api = "responses"
+env_key = "CODEX_API_KEY"
+[notice]
+"hide_gpt-5.1-codex-max_migration_prompt" = true

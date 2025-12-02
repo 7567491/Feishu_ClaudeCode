@@ -7,6 +7,10 @@ import sys
 import os
 import logging
 from flask import Flask, request, jsonify
+from dotenv import load_dotenv
+
+# 加载.env文件
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
 # 添加lib目录到路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -67,22 +71,41 @@ def webhook():
     """飞书Webhook处理"""
     try:
         data = request.json
+        logger.info(f"=== Received webhook request ===")
+        logger.info(f"Webhook data: {data}")
         logger.debug(f"Received webhook data: {data}")
 
         # 处理URL验证
         if data.get("type") == "url_verification":
             return jsonify({"challenge": data.get("challenge")})
 
-        # 处理事件
+        # 处理事件 (兼容v2.0格式)
+        event_data = None
         if data.get("type") == "event_callback":
-            event = data.get("event", {})
-            event_type = event.get("type")
+            logger.info("Processing event_callback (v1.0 format)")
+            event_data = data.get("event", {})
+        elif data.get("schema") == "2.0" and data.get("event"):
+            logger.info("Processing event (v2.0 format)")
+            event_data = data.get("event", {})
+
+        if event_data:
+            event = event_data
+            # v2.0格式中，事件类型在header中
+            if data.get("schema") == "2.0":
+                event_type = data.get("header", {}).get("event_type")
+            else:
+                event_type = event.get("type")
+            logger.info(f"Event type: {event_type}")
 
             # 处理接收消息事件
             if event_type == "im.message.receive_v1":
+                logger.info("Processing message receive event")
                 message_data = event.get("message", {})
                 content = message_data.get("content", "")
                 chat_id = message_data.get("chat_id")
+                chat_type = message_data.get("chat_type")
+                mentions = message_data.get("mentions") or []
+                logger.info(f"Chat ID: {chat_id}, Content: {content}")
 
                 # 解析消息内容（假设是文本消息）
                 import json as json_lib
@@ -92,21 +115,43 @@ def webhook():
                 except:
                     text_content = content
 
+                # 群聊只响应被@的消息（或@全体），私聊默认响应
+                if chat_type == "group":
+                    bot_name = getattr(Config, "BOT_NAME", "AI初老师")
+                    bot_app_id = Config.FEISHU_APP_ID
+                    mentioned = False
+                    for mention in mentions:
+                        mention_id = mention.get("id", {})
+                        mention_key = mention.get("key")
+                        mention_name = mention.get("name")
+
+                        if mention_key == "@_all":
+                            mentioned = True
+                            break
+                        if bot_app_id and mention_id.get("app_id") == bot_app_id:
+                            mentioned = True
+                            break
+                        if bot_name and mention_name and bot_name in mention_name:
+                            mentioned = True
+                            break
+                    if not mentioned:
+                        logger.info("Group message without mentioning AI初老师, ignore.")
+                        return jsonify({"status": "ignored", "reason": "not_mentioned"})
+
                 # 获取发送者信息
                 sender = event.get("sender", {})
-                user_id = sender.get("sender_id", {}).get("open_id", "")
+                sender_ids = sender.get("sender_id", {})
+                user_id = sender_ids.get("open_id") or sender_ids.get("user_id") or sender_ids.get("union_id") or ""
 
-                # 尝试获取用户昵称（可能需要调用API获取）
-                user_nickname = user_id  # 默认使用ID作为昵称
+                # 获取用户昵称（优先从群成员列表/飞书接口查询）
+                user_nickname = user_id
                 try:
-                    # 这里应该调用飞书API获取用户信息
-                    # user_info = feishu_client.get_user_info(user_id)
-                    # user_nickname = user_info.get("name", user_id)
-                    pass
-                except:
-                    pass
+                    user_nickname = feishu_client.get_user_nickname(user_id, chat_id)
+                except Exception as e:
+                    logger.warning(f"Failed to fetch user nickname, fallback to ID: {e}")
 
                 if text_content and chat_id and user_id:
+                    logger.info(f"Processing message from user {user_id}: {text_content}")
                     # 处理消息
                     reply = ai_teacher.handle_message(
                         user_id=user_id,
@@ -114,12 +159,16 @@ def webhook():
                         message=text_content,
                         chat_id=chat_id
                     )
+                    logger.info(f"Generated reply: {reply}")
 
                     # 发送回复
                     try:
                         feishu_client.send_text_message(chat_id, reply)
+                        logger.info("Reply sent successfully")
                     except Exception as e:
                         logger.error(f"Failed to send reply: {e}")
+                else:
+                    logger.warning(f"Missing required fields - text: {bool(text_content)}, chat_id: {bool(chat_id)}, user_id: {bool(user_id)}")
 
                 return jsonify({"status": "ok"})
 

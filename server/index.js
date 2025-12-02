@@ -74,6 +74,7 @@ import cliAuthRoutes from './routes/cli-auth.js';
 import userRoutes from './routes/user.js';
 import feishuRoutes from './routes/feishu.js';
 import feishuProxyRoutes from './routes/feishu-proxy.js';
+import adminRoutes from './routes/admin.js';
 import { initializeDatabase } from './database/db.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { initializeFeishuWebhook, createWebhookHandler } from './feishu-webhook.js';
@@ -321,6 +322,9 @@ app.use('/api/cli', authenticateToken, cliAuthRoutes);
 
 // User API Routes (protected)
 app.use('/api/user', authenticateToken, userRoutes);
+
+// Admin API Routes (protected - requires admin role)
+app.use('/api/admin', authenticateToken, adminRoutes);
 
 // Feishu API Routes (protected)
 app.use('/api/feishu', authenticateToken, feishuRoutes);

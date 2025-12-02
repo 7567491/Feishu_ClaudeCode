@@ -1,0 +1,128 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Auto-Dev Task State",
+  "description": "自动开发系统的任务状态跟踪",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "状态文件版本",
+      "default": "1.0.0"
+    },
+    "globalStatus": {
+      "type": "string",
+      "enum": ["running", "paused", "completed"],
+      "description": "全局状态：运行中/暂停/已完成"
+    },
+    "pauseReason": {
+      "type": "string",
+      "description": "暂停原因（如果 globalStatus = paused）"
+    },
+    "currentTaskIndex": {
+      "type": "number",
+      "description": "当前正在执行的任务索引"
+    },
+    "lastRun": {
+      "type": "string",
+      "format": "date-time",
+      "description": "上次运行时间"
+    },
+    "totalAttempts": {
+      "type": "number",
+      "description": "总尝试次数（统计用）"
+    },
+    "tasks": {
+      "type": "array",
+      "description": "所有任务列表",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "任务唯一ID，格式：stage{X}-task{Y}"
+          },
+          "stage": {
+            "type": "number",
+            "description": "阶段编号（0-8）"
+          },
+          "title": {
+            "type": "string",
+            "description": "任务标题"
+          },
+          "description": {
+            "type": "string",
+            "description": "任务详细描述（可选）"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "in_progress", "completed", "blocked"],
+            "description": "任务状态"
+          },
+          "retryCount": {
+            "type": "number",
+            "description": "当前重试次数（0-3）",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "dependencies": {
+            "type": "array",
+            "description": "依赖的任务ID列表（必须全部完成）",
+            "items": {
+              "type": "string"
+            }
+          },
+          "attempts": {
+            "type": "array",
+            "description": "历史尝试记录",
+            "items": {
+              "type": "object",
+              "properties": {
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "promptLevel": {
+                  "type": "number",
+                  "description": "提示词级别（0=友好，3=PUA）",
+                  "minimum": 0,
+                  "maximum": 3
+                },
+                "success": {
+                  "type": "boolean"
+                },
+                "error": {
+                  "type": "string",
+                  "description": "错误信息（如果失败）"
+                },
+                "output": {
+                  "type": "string",
+                  "description": "Claude 输出摘要（前500字符）"
+                },
+                "duration": {
+                  "type": "number",
+                  "description": "执行时长（秒）"
+                }
+              },
+              "required": ["timestamp", "promptLevel", "success"]
+            }
+          },
+          "lastError": {
+            "type": "string",
+            "description": "最后一次错误信息"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "完成时间"
+          },
+          "verificationScript": {
+            "type": "string",
+            "description": "验证脚本路径（可选，用于测试是否真正完成）"
+          }
+        },
+        "required": ["id", "stage", "title", "status", "retryCount", "dependencies", "attempts"]
+      }
+    }
+  },
+  "required": ["version", "globalStatus", "currentTaskIndex", "tasks"]
+}

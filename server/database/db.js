@@ -75,6 +75,74 @@ const runMigrations = () => {
       db.exec('ALTER TABLE users ADD COLUMN has_completed_onboarding BOOLEAN DEFAULT 0');
     }
 
+    // Multi-user support migrations
+    if (!columnNames.includes('role')) {
+      console.log('Running migration: Adding role column for multi-user support');
+      db.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user', 'viewer'))");
+      // Set first user as admin
+      db.exec("UPDATE users SET role = 'admin' WHERE id = 1");
+    }
+
+    if (!columnNames.includes('email')) {
+      console.log('Running migration: Adding email column for multi-user support');
+      // Note: Cannot add UNIQUE constraint directly in ALTER TABLE for existing tables
+      // Just add the column without UNIQUE constraint for now
+      db.exec('ALTER TABLE users ADD COLUMN email TEXT');
+    }
+
+    if (!columnNames.includes('created_by')) {
+      console.log('Running migration: Adding created_by column');
+      db.exec('ALTER TABLE users ADD COLUMN created_by INTEGER REFERENCES users(id)');
+    }
+
+    if (!columnNames.includes('max_projects')) {
+      console.log('Running migration: Adding user quota columns');
+      db.exec('ALTER TABLE users ADD COLUMN max_projects INTEGER DEFAULT 10');
+      db.exec('ALTER TABLE users ADD COLUMN max_api_keys INTEGER DEFAULT 5');
+    }
+
+    // Create user_invitations table if it doesn't exist
+    const invitationTableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_invitations'").get();
+    if (!invitationTableExists) {
+      console.log('Running migration: Creating user_invitations table');
+      db.exec(`
+        CREATE TABLE user_invitations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          invite_code TEXT UNIQUE NOT NULL,
+          email TEXT,
+          role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user', 'viewer')),
+          created_by INTEGER NOT NULL REFERENCES users(id),
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          used_at DATETIME,
+          used_by INTEGER REFERENCES users(id),
+          expires_at DATETIME,
+          is_active BOOLEAN DEFAULT 1
+        )
+      `);
+      db.exec('CREATE INDEX idx_user_invitations_code ON user_invitations(invite_code)');
+    }
+
+    // Create user_sessions table if it doesn't exist
+    const sessionTableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_sessions'").get();
+    if (!sessionTableExists) {
+      console.log('Running migration: Creating user_sessions table for session management');
+      db.exec(`
+        CREATE TABLE user_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id),
+          token_hash TEXT UNIQUE NOT NULL,
+          ip_address TEXT,
+          user_agent TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          last_activity DATETIME DEFAULT CURRENT_TIMESTAMP,
+          expires_at DATETIME,
+          is_active BOOLEAN DEFAULT 1
+        )
+      `);
+      db.exec('CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id)');
+      db.exec('CREATE INDEX idx_user_sessions_token_hash ON user_sessions(token_hash)');
+    }
+
     console.log('Database migrations completed successfully');
   } catch (error) {
     console.error('Error running migrations:', error.message);
@@ -140,7 +208,7 @@ const userDb = {
   // Get user by ID
   getUserById: (userId) => {
     try {
-      const row = db.prepare('SELECT id, username, created_at, last_login FROM users WHERE id = ? AND is_active = 1').get(userId);
+      const row = db.prepare('SELECT id, username, email, role, created_at, last_login, has_completed_onboarding FROM users WHERE id = ? AND is_active = 1').get(userId);
       return row;
     } catch (err) {
       throw err;
@@ -187,6 +255,79 @@ const userDb = {
     try {
       const row = db.prepare('SELECT has_completed_onboarding FROM users WHERE id = ?').get(userId);
       return row?.has_completed_onboarding === 1;
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  // Multi-user support functions
+  getAllUsers: () => {
+    try {
+      const rows = db.prepare('SELECT id, username, email, role, created_at, last_login, is_active FROM users ORDER BY created_at ASC').all();
+      return rows;
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  getUserByEmail: (email) => {
+    try {
+      const row = db.prepare('SELECT * FROM users WHERE email = ? AND is_active = 1').get(email);
+      return row;
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  updateUserRole: (userId, role) => {
+    try {
+      const stmt = db.prepare('UPDATE users SET role = ? WHERE id = ?');
+      stmt.run(role, userId);
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  deactivateUser: (userId) => {
+    try {
+      const stmt = db.prepare('UPDATE users SET is_active = 0 WHERE id = ?');
+      stmt.run(userId);
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  reactivateUser: (userId) => {
+    try {
+      const stmt = db.prepare('UPDATE users SET is_active = 1 WHERE id = ?');
+      stmt.run(userId);
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  getUserRole: (userId) => {
+    try {
+      const row = db.prepare('SELECT role FROM users WHERE id = ? AND is_active = 1').get(userId);
+      return row?.role || 'user';
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  isUserAdmin: (userId) => {
+    try {
+      const role = userDb.getUserRole(userId);
+      return role === 'admin';
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  countActiveUsers: () => {
+    try {
+      const row = db.prepare('SELECT COUNT(*) as count FROM users WHERE is_active = 1').get();
+      return row.count;
     } catch (err) {
       throw err;
     }

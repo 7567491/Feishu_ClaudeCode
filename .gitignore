@@ -108,6 +108,10 @@ temp/
 .serena/
 CLAUDE.md
 .mcp.json
+.codex/
+
+# Python local packages (virtual environment)
+.local/
 
 # Feishu session data (dynamic runtime directories)
 feicc/

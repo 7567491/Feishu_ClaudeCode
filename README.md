@@ -102,6 +102,39 @@ node server/show-processes.js
 node server/show-processes.js --json
 ```
 
+### 📚 Paper 文献检索功能
+
+飞书机器人支持智能文献检索和 PDF 下载功能，通过 `paper` 指令快速获取学术论文。
+
+**使用方法：**
+```
+paper {关键词}
+```
+
+**功能流程：**
+1. 调用 Claude 生成指定主题的文献综述
+2. 返回包含作者、年份、论文名称、引用次数、期刊和中文翻译的论文表格
+3. 自动下载论文 PDF 到当前工作目录的 `./pdf` 子目录
+4. 通过飞书消息发送下载成功的 PDF 文件
+
+**示例：**
+```
+paper 深度学习
+paper 强化学习在机器人控制中的应用
+```
+
+**技术实现：**
+- 论文表格解析：`server/lib/paper-command-handler.js`
+- PDF 下载器：`server/lib/paper-downloader.js`
+- Python 下载脚本：`server/lib/download-paper.py`
+- 支持 arXiv、Google Scholar 等多个数据源
+- 并发下载（最多 3 个），自动重试机制
+
+**注意事项：**
+- 下载可能需要 1-5 分钟，具体取决于论文数量和网络状况
+- 部分论文可能因访问限制或版权原因无法下载
+- PDF 文件保存在会话工作目录的 `pdf/` 子目录中
+
 ### 🔌 Bot-to-Bot 集成：AI初老师 ⭐ 重要机器人代码
 
 **场景：** 多个飞书机器人在同一个群里协作，AI初老师作为入口引导用户，小六负责实际开发任务。

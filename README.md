@@ -20,6 +20,7 @@
 - **后端:** Node.js + Express + WebSocket + Feishu WebSocket SDK (@larksuiteoapi/node-sdk v1.55.0)
 - **前端:** React 18 + Vite + CodeMirror + Tailwind CSS
 - **集成:** Claude CLI (gaccode 2.0.37) + SQLite 会话管理
+- **AI初老师:** Python Flask + 会话持久化 (端口 33301)
 - **部署:** Nginx + PM2 + SSL (Let's Encrypt)
 
 ## 🚀 快速开始
@@ -42,9 +43,16 @@ npm run build && npm run server
 
 ```bash
 # PM2 管理
-pm2 start npm --name "claude-code-ui" -- run server
-pm2 start npm --name "feishu" -- run feishu
+pm2 start npm --name "claude-code-ui" -- run server  # 主服务 (端口 33300)
+pm2 start npm --name "feishu" -- run feishu         # 飞书 WebSocket 服务
+cd teacher && pm2 start ecosystem.config.cjs         # AI初老师 (端口 33301)
 pm2 save
+
+# PM2 常用命令
+pm2 status              # 查看所有服务状态
+pm2 logs [service]      # 查看服务日志
+pm2 restart all         # 重启所有服务
+pm2 stop all            # 停止所有服务
 
 # Nginx 配置示例 (WebSocket 支持)
 server {
@@ -100,6 +108,32 @@ node server/show-processes.js
 
 # JSON格式
 node server/show-processes.js --json
+```
+
+### 🗂️ 工作目录管理（重要）
+
+每个飞书群聊绑定一个固定的工作目录（`project_path`），存储在数据库中。
+
+**工作目录保护机制：**
+- ✅ **cd 命令已禁用** - 防止运行时修改工作目录导致的状态不一致
+- ✅ **只读原则** - `project_path` 在会话创建时确定，运行时不可修改
+- ✅ **子目录访问** - 使用相对路径访问子目录（如 `ls subdir/`）
+
+**查询群聊工作目录：**
+```bash
+sqlite3 server/database/auth.db "SELECT conversation_id, project_path FROM feishu_sessions WHERE session_type='group';"
+```
+
+**修改工作目录（需手动操作数据库）：**
+```bash
+# 1. 更新数据库
+sqlite3 server/database/auth.db "UPDATE feishu_sessions SET project_path = '/new/path' WHERE id = <session_id>;"
+
+# 2. 移动文件
+cp -r /old/path/* /new/path/
+
+# 3. 重启服务
+pm2 restart feishu
 ```
 
 ### 📚 Paper 文献检索功能

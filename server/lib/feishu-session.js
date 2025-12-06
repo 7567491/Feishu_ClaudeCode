@@ -20,6 +20,11 @@ export class FeishuSessionManager {
     this.userId = userId; // User ID for database operations
     this.baseDir = baseDir; // Base directory for Feishu projects
     this.feishuClient = feishuClient; // Feishu client for API calls
+
+    // Track sent files per session to prevent duplicates
+    // Map: conversationId -> Set of sent file paths
+    this.sentFilesMap = new Map();
+
     console.log('[SessionManager] Initialized with base dir:', this.baseDir);
     if (feishuClient) {
       console.log('[SessionManager] Feishu client provided for chat info lookup');
@@ -264,6 +269,55 @@ export class FeishuSessionManager {
    */
   getStats() {
     return feishuDb.getStats(this.userId);
+  }
+
+  /**
+   * Check if a file has been sent in this conversation
+   * @param {string} conversationId - Conversation ID
+   * @param {string} filePath - Full file path
+   * @returns {boolean} - True if file was already sent
+   */
+  isFileSent(conversationId, filePath) {
+    const sentFiles = this.sentFilesMap.get(conversationId);
+    if (!sentFiles) {
+      return false;
+    }
+    return sentFiles.has(filePath);
+  }
+
+  /**
+   * Mark a file as sent in this conversation
+   * @param {string} conversationId - Conversation ID
+   * @param {string} filePath - Full file path
+   */
+  markFileSent(conversationId, filePath) {
+    let sentFiles = this.sentFilesMap.get(conversationId);
+    if (!sentFiles) {
+      sentFiles = new Set();
+      this.sentFilesMap.set(conversationId, sentFiles);
+    }
+    sentFiles.add(filePath);
+    console.log('[SessionManager] Marked file as sent:', {
+      conversationId,
+      filePath,
+      totalSentFiles: sentFiles.size
+    });
+  }
+
+  /**
+   * Clear sent files tracking for a conversation
+   * @param {string} conversationId - Conversation ID
+   */
+  clearSentFiles(conversationId) {
+    const sentFiles = this.sentFilesMap.get(conversationId);
+    if (sentFiles) {
+      const count = sentFiles.size;
+      this.sentFilesMap.delete(conversationId);
+      console.log('[SessionManager] Cleared sent files:', {
+        conversationId,
+        clearedCount: count
+      });
+    }
   }
 
   /**

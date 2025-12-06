@@ -33,7 +33,16 @@ export class FeishuClient {
     this.messageHandler = null;
     this.botInfo = null; // Bot's own info (to identify mentions)
 
+    // 无需@即可响应的群聊白名单（1-、2-、3-开头的群聊）
+    // 这些群聊中，任何用户消息都会触发机器人响应
+    this.noMentionRequiredChats = new Set([
+      'oc_8623156bb41f217a3822aca12362b068',  // 1-市场活动 (/home/event)
+      'oc_4a6d86d4fe64fba7300cd867611ad752',  // 2-案例库 (/home/case)
+      'oc_3de30cbfdd18839ccc2b4566db8d8a24',  // 3-WebX (/home/webx)
+    ]);
+
     console.log('[FeishuClient] Initialized with App ID:', this.appId);
+    console.log('[FeishuClient] No-mention-required chats:', this.noMentionRequiredChats.size);
   }
 
   /**
@@ -163,6 +172,7 @@ export class FeishuClient {
    * Check if a message is for the bot
    * Returns true for:
    * - Private chats (chat_type === 'p2p')
+   * - Group chats in noMentionRequiredChats whitelist (无需@即可响应)
    * - Group chats where bot is mentioned (不区分发送者是用户还是机器人)
    */
   isMessageForBot(event) {
@@ -178,8 +188,18 @@ export class FeishuClient {
       return true;
     }
 
-    // Group chat - check for mentions
+    // Group chat - check whitelist first, then mentions
     if (message.chat_type === 'group') {
+      const chatId = message.chat_id;
+
+      // 检查是否在无需@响应的白名单中
+      if (this.noMentionRequiredChats.has(chatId)) {
+        console.log('[FeishuClient] isMessageForBot: Chat in no-mention-required whitelist, returning true');
+        console.log('[FeishuClient] Chat ID:', chatId);
+        return true;
+      }
+
+      // 其他群聊需要@才能响应
       const mentions = message.mentions;
       console.log('[FeishuClient] isMessageForBot: Group chat, mentions:', mentions?.length || 0);
 
@@ -357,10 +377,10 @@ export class FeishuClient {
       const stats = fs.statSync(filePath);
       const fileName = path.basename(filePath);
 
-      // Check file size (20MB limit for safety)
-      const maxSize = 20 * 1024 * 1024; // 20MB
+      // Check file size (100MB limit for safety)
+      const maxSize = 100 * 1024 * 1024; // 100MB
       if (stats.size > maxSize) {
-        throw new Error(`File too large: ${(stats.size / 1024 / 1024).toFixed(2)}MB (max 20MB)`);
+        throw new Error(`File too large: ${(stats.size / 1024 / 1024).toFixed(2)}MB (max 100MB)`);
       }
 
       console.log('[FeishuClient] Uploading file:', fileName, `(${(stats.size / 1024).toFixed(2)}KB)`);
@@ -1144,6 +1164,197 @@ export class FeishuClient {
     } catch (error) {
       console.error('[FeishuClient] Error getting chat info:', error.message);
       return null;
+    }
+  }
+
+  /**
+   * Upload file to Feishu Drive (云盘) - 支持大文件分片上传
+   * @param {string} filePath - Path to the file to upload
+   * @param {string} parentNode - Parent folder token (defaults to 'me' for user's root)
+   * @param {string} parentType - Parent type: 'explorer' for folder token (default)
+   * @returns {Promise<{file_token: string, url: string}>}
+   */
+  async uploadToDrive(filePath, parentNode = 'me', parentType = 'explorer') {
+    try {
+      // Check if file exists
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`文件不存在: ${filePath}`);
+      }
+
+      // Get file stats
+      const stats = fs.statSync(filePath);
+      const fileName = path.basename(filePath);
+      const fileSize = stats.size;
+
+      console.log('[FeishuClient] 上传文件到云盘:', fileName, `(${(fileSize / 1024 / 1024).toFixed(2)}MB)`);
+
+      // 小文件直接上传，大文件（>10MB）使用分片上传
+      const useChunkedUpload = fileSize > 10 * 1024 * 1024;
+
+      if (useChunkedUpload) {
+        console.log('[FeishuClient] 使用分片上传');
+        return await this._uploadToDriveChunked(filePath, fileName, fileSize, parentNode, parentType);
+      } else {
+        console.log('[FeishuClient] 使用直接上传');
+        return await this._uploadToDriveDirect(filePath, fileName, parentNode, parentType);
+      }
+
+    } catch (error) {
+      console.error('[FeishuClient] 云盘上传失败:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * 直接上传小文件
+   * @private
+   */
+  async _uploadToDriveDirect(filePath, fileName, parentNode, parentType) {
+    const fileStream = fs.createReadStream(filePath);
+
+    const uploadData = {
+      file_name: fileName,
+      file: fileStream,
+      parent_type: parentType,
+      parent_node: parentNode
+    };
+
+    const res = await this.client.drive.file.uploadAll({
+      data: uploadData
+    });
+
+    if (res.code === 0) {
+      const fileToken = res.data?.file_token;
+      const url = `https://feishu.cn/drive/folder/${fileToken}`;
+
+      console.log('[FeishuClient] 文件上传成功');
+      console.log('  - File Token:', fileToken);
+      console.log('  - URL:', url);
+
+      return {
+        file_token: fileToken,
+        url: url,
+        file_name: fileName
+      };
+    } else {
+      throw new Error(`上传失败: ${res.code} - ${res.msg}`);
+    }
+  }
+
+  /**
+   * 分片上传大文件
+   * @private
+   */
+  async _uploadToDriveChunked(filePath, fileName, fileSize, parentNode, parentType) {
+    // Step 1: 预上传
+    console.log('[FeishuClient] Step 1/3: 预上传...');
+    const prepareData = {
+      file_name: fileName,
+      size: fileSize,
+      parent_type: parentType,
+      parent_node: parentNode
+    };
+
+    const prepareRes = await this.client.drive.file.uploadPrepare({
+      data: prepareData
+    });
+
+    if (prepareRes.code !== 0) {
+      throw new Error(`预上传失败: ${prepareRes.code} - ${prepareRes.msg}`);
+    }
+
+    const uploadId = prepareRes.data?.upload_id;
+    const blockSize = prepareRes.data?.block_size || 4 * 1024 * 1024; // 默认 4MB
+    const blockNum = prepareRes.data?.block_num || Math.ceil(fileSize / blockSize);
+
+    console.log('[FeishuClient] 预上传成功');
+    console.log('  - Upload ID:', uploadId);
+    console.log('  - Block Size:', (blockSize / 1024 / 1024).toFixed(2), 'MB');
+    console.log('  - Total Blocks:', blockNum);
+
+    // Step 2: 分片上传
+    console.log('[FeishuClient] Step 2/3: 分片上传...');
+
+    for (let seq = 0; seq < blockNum; seq++) {
+      const start = seq * blockSize;
+      const end = Math.min(start + blockSize, fileSize);
+      const chunkSize = end - start;
+
+      console.log(`[FeishuClient] 上传分片 ${seq + 1}/${blockNum} (${(chunkSize / 1024 / 1024).toFixed(2)}MB)...`);
+
+      // 读取文件分片
+      const buffer = Buffer.alloc(chunkSize);
+      const fd = fs.openSync(filePath, 'r');
+      fs.readSync(fd, buffer, 0, chunkSize, start);
+      fs.closeSync(fd);
+
+      const partRes = await this.client.drive.file.uploadPart({
+        data: {
+          upload_id: uploadId,
+          seq: seq,
+          size: chunkSize,
+          file: buffer
+        }
+      });
+
+      if (partRes.code !== 0) {
+        throw new Error(`分片上传失败 (${seq + 1}/${blockNum}): ${partRes.code} - ${partRes.msg}`);
+      }
+    }
+
+    console.log('[FeishuClient] 所有分片上传完成');
+
+    // Step 3: 完成上传
+    console.log('[FeishuClient] Step 3/3: 完成上传...');
+    const finishRes = await this.client.drive.file.uploadFinish({
+      data: {
+        upload_id: uploadId,
+        block_num: blockNum
+      }
+    });
+
+    if (finishRes.code !== 0) {
+      throw new Error(`完成上传失败: ${finishRes.code} - ${finishRes.msg}`);
+    }
+
+    const fileToken = finishRes.data?.file_token;
+    const url = `https://feishu.cn/drive/folder/${fileToken}`;
+
+    console.log('[FeishuClient] 文件上传成功');
+    console.log('  - File Token:', fileToken);
+    console.log('  - URL:', url);
+
+    return {
+      file_token: fileToken,
+      url: url,
+      file_name: fileName
+    };
+  }
+
+  /**
+   * Upload file to Drive and send link to chat
+   * @param {string} chatId - Chat ID
+   * @param {string} filePath - Path to file
+   * @param {string} parentNode - Parent folder token (optional)
+   * @returns {Promise<{file_token: string, url: string, message_id: string}>}
+   */
+  async uploadAndShareToDrive(chatId, filePath, parentNode = null) {
+    try {
+      // Upload to Drive
+      const result = await this.uploadToDrive(filePath, parentNode);
+
+      // Send link to chat
+      const text = `📁 文件已上传到云盘：${result.file_name}\n🔗 ${result.url}\n\n💡 可用于飞书妙记转写`;
+      const msgResult = await this.sendTextMessage(chatId, text);
+
+      return {
+        ...result,
+        message_id: msgResult.message_id
+      };
+
+    } catch (error) {
+      console.error('[FeishuClient] 上传并分享失败:', error.message);
+      throw error;
     }
   }
 }

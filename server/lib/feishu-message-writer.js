@@ -6,13 +6,16 @@
  */
 
 import { FeishuFileHandler } from './feishu-file-handler.js';
+import { ClaudeOutputFilter } from './filter-claude-output.js';
 
 export class FeishuMessageWriter {
-  constructor(feishuClient, chatId, sessionId = null, projectPath = null) {
+  constructor(feishuClient, chatId, sessionId = null, projectPath = null, sessionManager = null, conversationId = null) {
     this.feishuClient = feishuClient; // Feishu client instance
     this.chatId = chatId; // Feishu chat_id or open_id
     this.sessionId = sessionId; // Claude session ID (set later)
     this.projectPath = projectPath; // Project root for resolving files
+    this.sessionManager = sessionManager; // Session manager for tracking sent files
+    this.conversationId = conversationId; // Conversation ID for tracking
 
     this.buffer = ''; // Accumulated text buffer
     this.collectedText = ''; // Full text for post-processing
@@ -22,6 +25,9 @@ export class FeishuMessageWriter {
 
     this.isCompleted = false; // Whether session is completed
     this.flushTimer = null; // Auto-flush timer
+
+    // 智能输出过滤器（过滤系统输出、JSON、代码块等）
+    this.outputFilter = new ClaudeOutputFilter();
 
     console.log('[FeishuWriter] Initialized for chat:', chatId);
   }
@@ -134,7 +140,11 @@ export class FeishuMessageWriter {
    */
   handleClaudeOutput(data) {
     if (data && typeof data === 'string') {
-      this.appendText(data);
+      // 使用智能过滤器过滤输出
+      const filtered = this.outputFilter.filter(data);
+      if (filtered) {
+        this.appendText(filtered);
+      }
     }
   }
 
@@ -143,7 +153,15 @@ export class FeishuMessageWriter {
    */
   handleError(error) {
     console.error('[FeishuWriter] Claude error:', error);
-    this.appendText(`\n⚠️ Error: ${error}\n`);
+
+    // 使用过滤器美化错误消息
+    const beautified = this.outputFilter.beautifyError(error);
+    if (beautified) {
+      this.appendText(`\n${beautified}\n`);
+    } else {
+      // 如果无法美化，使用通用错误提示
+      this.appendText(`\n⚠️ 操作遇到问题，请稍后重试\n`);
+    }
   }
 
   /**
@@ -276,6 +294,17 @@ export class FeishuMessageWriter {
     // Auto-send mentioned markdown files after all text flushed
     await this.sendMentionedMarkdownFiles();
 
+    // 输出过滤统计
+    const stats = this.outputFilter.getStats();
+    if (stats.totalFiltered > 0) {
+      console.log('[FeishuWriter] 过滤统计:', {
+        总过滤数: stats.totalFiltered,
+        代码块: stats.codeBlocksFiltered,
+        系统输出: stats.systemOutputFiltered,
+        错误美化: stats.errorsBeautified,
+      });
+    }
+
     console.log('[FeishuWriter] Message stream completed');
   }
 
@@ -318,13 +347,14 @@ export class FeishuMessageWriter {
   }
 
   /**
-   * Detect and send any markdown files mentioned in the response text
+   * Detect and send any markdown/PDF files mentioned in the response text
+   * 在整个会话中同一文件只发送一次（去重）
    */
   async sendMentionedMarkdownFiles() {
     if (!this.projectPath || !this.collectedText) return;
 
     try {
-      const matches = this.collectedText.match(/\b[^\s`'"<>]+\.(md)\b/gi);
+      const matches = this.collectedText.match(/\b[^\s`'"<>]+\.(md|pdf)\b/gi);
       if (!matches) return;
 
       const uniqueFiles = [...new Set(matches.map((name) => name.replace(/[，。,.;:]+$/, '')))];
@@ -332,14 +362,31 @@ export class FeishuMessageWriter {
       for (const fileName of uniqueFiles) {
         const filePath = FeishuFileHandler.findFile(this.projectPath, fileName);
         if (!filePath) {
-          console.log('[FeishuWriter] Mentioned markdown not found:', fileName);
+          console.log('[FeishuWriter] Mentioned file not found:', fileName);
           continue;
         }
 
+        // 检查文件是否已在当前会话中发送过
+        if (this.sessionManager && this.conversationId) {
+          if (this.sessionManager.isFileSent(this.conversationId, filePath)) {
+            console.log('[FeishuWriter] 跳过已发送文件:', {
+              fileName,
+              filePath,
+              conversationId: this.conversationId
+            });
+            continue;
+          }
+        }
+
         await this.sendFile(filePath);
+
+        // 标记文件为已发送
+        if (this.sessionManager && this.conversationId) {
+          this.sessionManager.markFileSent(this.conversationId, filePath);
+        }
       }
     } catch (error) {
-      console.error('[FeishuWriter] Failed to send mentioned markdown files:', error.message);
+      console.error('[FeishuWriter] Failed to send mentioned files:', error.message);
     }
   }
 }

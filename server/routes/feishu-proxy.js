@@ -159,6 +159,43 @@ router.post('/query', async (req, res) => {
       });
     }
 
+    // Check if this is a paper command
+    const trimmedMessage = message.trim();
+    if (trimmedMessage.toLowerCase().startsWith('paper ')) {
+      const keyword = trimmedMessage.substring(6).trim();
+
+      if (!keyword) {
+        await feishuClient.sendTextMessage(chatId, '❌ 请提供关键词，例如：paper 深度学习');
+        return res.status(400).json({
+          success: false,
+          error: 'Missing keyword for paper command'
+        });
+      }
+
+      console.log('[FeishuProxy] Paper command detected:', keyword);
+
+      try {
+        const { PaperCommandHandler } = await import('../lib/paper-command-handler.js');
+        const handler = new PaperCommandHandler(feishuClient);
+        await handler.handle(chatId, keyword, session);
+
+        DataAccess.logMessage(session.id, 'outgoing', 'paper', `paper:${keyword}`, null);
+
+        return res.json({
+          success: true,
+          message: `Paper command executed: ${keyword}`,
+          sessionId: session.id
+        });
+      } catch (error) {
+        console.error('[FeishuProxy] Paper command failed:', error.message);
+        await feishuClient.sendTextMessage(chatId, `❌ Paper 指令处理失败: ${error.message}`);
+        return res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    }
+
     // Handle markdown convert command: "转化 xx.md"
     const convertCommand = FeishuFileHandler.parseConvertCommand(message);
     if (convertCommand && convertCommand.command === 'convert') {
@@ -237,7 +274,9 @@ router.post('/query', async (req, res) => {
       feishuClient,
       chatId,
       session.claude_session_id,
-      session.project_path
+      session.project_path,
+      sessionManager,
+      session.conversation_id
     );
 
     // Call Claude (async, don't wait)

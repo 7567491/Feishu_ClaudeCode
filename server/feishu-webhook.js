@@ -274,59 +274,47 @@ async function handleMessageEvent(data) {
       console.log('  Mentions count:', mentions.length);
       console.log('  Mentions details:', JSON.stringify(mentions, null, 2));
 
-      // 🎯 特殊处理：检查是否为张璐的单人群聊
+      // 🎯 新机制：根据群聊中机器人数量决定是否需要@
       // 获取群成员统计信息（从缓存读取，性能很好）
       const memberStats = feishuDb.getGroupMemberStats(chatId);
-      const cachedMembers = feishuDb.getGroupMembers(chatId);
 
-      // 判断是否为单用户群聊（1个用户 + 机器人）
-      let isSingleUserGroup = false;
-      let isZhangLuGroup = false;
+      let requireMention = false; // 是否需要@才响应
 
       if (memberStats) {
-        console.log(`[FeishuWebhook] Group member stats: users=${memberStats.user_count}, bots=${memberStats.bot_count}`);
+        const botCount = memberStats.bot_count || 0;
+        console.log(`[FeishuWebhook] 📊 群聊统计: users=${memberStats.user_count}, bots=${botCount}`);
 
-        // 检查是否只有一个用户（可能有一个或多个机器人）
-        if (memberStats.user_count === 1) {
-          // 获取唯一的用户信息
-          const userMember = cachedMembers.find(m => m.member_type === 'user' || !m.member_type);
-          if (userMember) {
-            console.log(`[FeishuWebhook] Single user detected: ${userMember.member_name || userMember.member_open_id}`);
-
-            // 判断是否为张璐（支持多种名称格式）
-            const memberName = userMember.member_name || '';
-            if (memberName === '张璐' ||
-                memberName.includes('张璐') ||
-                memberName === 'zhanglu' ||
-                memberName.toLowerCase().includes('zhang') && memberName.toLowerCase().includes('lu')) {
-              isSingleUserGroup = true;
-              isZhangLuGroup = true;
-              console.log('[FeishuWebhook] ✨ 张璐专属群聊模式激活 - 无需@即可对话');
-            }
-          }
+        // 核心逻辑：只有当群聊中有2个或以上机器人时才需要@
+        if (botCount >= 2) {
+          requireMention = true;
+          console.log('[FeishuWebhook] 🤖 检测到多机器人环境 (≥2个机器人)，需要@才响应');
+        } else {
+          requireMention = false;
+          console.log('[FeishuWebhook] ✨ 单机器人环境 (<2个机器人)，无需@即可响应');
         }
+      } else {
+        // 如果无法获取统计信息，默认需要@（保守策略）
+        requireMention = true;
+        console.log('[FeishuWebhook] ⚠️  无法获取群成员信息，默认需要@才响应');
       }
 
-      // 如果是张璐的单人群聊，跳过@检查，直接处理消息
-      if (isSingleUserGroup && isZhangLuGroup) {
-        console.log('[FeishuWebhook] 📍 Auto-processing message from 张璐 (no @ required)');
-        // 不return，继续处理消息
-      } else if (mentions.length === 0 && !isSendMdCommand) {
-        // 非张璐专属群聊，仍需要@
-        console.log('[FeishuWebhook] Group message without mention, skipping');
-        return;
-      } else {
+      // 根据是否需要@来决定处理流程
+      if (requireMention) {
+        // 多机器人环境：需要检查@
+        if (mentions.length === 0 && !isSendMdCommand) {
+          console.log('[FeishuWebhook] 多机器人群聊需要@，但未检测到mention，跳过处理');
+          return;
+        }
+
         // 有@的情况，检查是否@了当前机器人
-        // 🔧 Fix: Check if THIS bot was mentioned (not just any bot)
-        // In multi-bot groups, only respond when explicitly mentioned
         let isMentioned = false;
 
         for (const mention of mentions) {
           console.log('  Checking mention:', JSON.stringify(mention, null, 2));
 
           // Check multiple fields to determine if this bot was mentioned
-          // Method 1: Check if mention key contains bot name (从配置或环境变量读取)
-          const botName = process.env.FeishuCC_Bot_Name || '小六'; // 可配置机器人名称
+          // Method 1: Check if mention key contains bot name
+          const botName = process.env.FeishuCC_Bot_Name || '小六';
           if (mention.key && mention.key.includes(botName)) {
             console.log(`  ✅ Bot "${botName}" was mentioned via key`);
             isMentioned = true;
@@ -356,12 +344,15 @@ async function handleMessageEvent(data) {
         }
 
         if (!isMentioned && !isSendMdCommand) {
-          console.log('[FeishuWebhook] ❌ This bot was NOT mentioned, skipping');
-          console.log('[FeishuWebhook] (Another bot in the group was mentioned)');
+          console.log('[FeishuWebhook] ❌ 多机器人环境中未@本机器人，跳过处理');
+          console.log('[FeishuWebhook] (可能@了其他机器人)');
           return;
         }
 
-        console.log('[FeishuWebhook] ✅ This bot WAS mentioned, processing message');
+        console.log('[FeishuWebhook] ✅ 检测到@本机器人，继续处理');
+      } else {
+        // 单机器人环境：无需@即可响应
+        console.log('[FeishuWebhook] ✅ 单机器人环境，直接处理消息（无需@）');
       }
     }
 
@@ -551,7 +542,9 @@ async function handleMessageEvent(data) {
       },
       chatId,
       session.claude_session_id,
-      actualWorkingDir
+      actualWorkingDir,
+      sessionManager,
+      session.conversation_id
     );
 
     // Call Claude with context isolation

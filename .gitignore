@@ -109,6 +109,7 @@ temp/
 CLAUDE.md
 .mcp.json
 .codex/
+.gemini/
 
 # Python local packages (virtual environment)
 .local/
@@ -166,6 +167,9 @@ __pycache__/
 *.pyo
 cachedir_joblib/
 .storm_local_cache/
+
+# Teacher runtime sessions
+teacher/sessions.json
 
 # PDF downloads
 pdf/

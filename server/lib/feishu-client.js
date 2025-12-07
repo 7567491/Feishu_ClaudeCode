@@ -108,6 +108,7 @@ export class FeishuClient {
       console.log('  Message ID:', event.message?.message_id);
       console.log('  Chat ID:', event.message?.chat_id);
       console.log('  Chat Type:', event.message?.chat_type);
+      console.log('  Message Type:', event.message?.message_type);
       console.log('  Sender:', event.sender?.sender_id?.open_id);
       console.log('  Sender Type:', event.sender?.sender_type); // 新增：打印发送者类型
       console.log('  Sender ID Type:', event.sender?.sender_id?.id_type); // 新增：打印ID类型
@@ -124,6 +125,8 @@ export class FeishuClient {
         return;
       }
 
+      const msgType = event.message?.message_type;
+
       // Extract message content
       const content = event.message?.content;
       if (!content) {
@@ -139,6 +142,24 @@ export class FeishuClient {
         return;
       }
 
+      // Handle different message types
+      if (msgType === 'file' || msgType === 'image' || msgType === 'media') {
+        // File/image/media message - pass to handler with special payload
+        console.log('[FeishuClient] File/Image/Media message detected');
+
+        const filePayload = {
+          type: msgType,
+          fileKey: parsedContent.file_key || parsedContent.image_key || parsedContent.media_key,
+          fileName: parsedContent.file_name || null
+        };
+
+        if (this.messageHandler) {
+          await this.messageHandler(event, null, filePayload);
+        }
+        return;
+      }
+
+      // Text message handling (existing logic)
       // Extract text from different message types
       let userText = '';
       if (parsedContent.text) {
@@ -159,7 +180,7 @@ export class FeishuClient {
 
       // Call message handler
       if (this.messageHandler) {
-        await this.messageHandler(event, userText.trim());
+        await this.messageHandler(event, userText.trim(), null);
       }
 
     } catch (error) {
@@ -1164,6 +1185,102 @@ export class FeishuClient {
     } catch (error) {
       console.error('[FeishuClient] Error getting chat info:', error.message);
       return null;
+    }
+  }
+
+  /**
+   * Download file from Feishu by file_key
+   * @param {string} fileKey - File key from message
+   * @param {string} messageId - Message ID (for getting file info)
+   * @returns {Promise<{buffer: Buffer, fileName: string, fileSize: number}>}
+   */
+  async downloadFile(fileKey, messageId) {
+    try {
+      console.log('[FeishuClient] Downloading file:', fileKey);
+
+      // Get file info first
+      const res = await this.client.im.file.get({
+        path: {
+          file_key: fileKey
+        }
+      });
+
+      if (!res || !res.file) {
+        throw new Error('Failed to download file: no file data returned');
+      }
+
+      // res.file is a Buffer
+      const buffer = res.file;
+      console.log('[FeishuClient] File downloaded, size:', buffer.length, 'bytes');
+
+      // Try to get file name from message resource
+      let fileName = 'unknown';
+      try {
+        const msgRes = await this.client.im.messageResource.get({
+          path: {
+            message_id: messageId,
+            file_key: fileKey
+          },
+          params: {
+            type: 'file'
+          }
+        });
+
+        if (msgRes && msgRes.file_name) {
+          fileName = msgRes.file_name;
+        }
+      } catch (nameError) {
+        console.log('[FeishuClient] Could not get file name, using default');
+      }
+
+      return {
+        buffer,
+        fileName,
+        fileSize: buffer.length
+      };
+
+    } catch (error) {
+      console.error('[FeishuClient] Failed to download file:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Download image from Feishu by image_key
+   * @param {string} imageKey - Image key from message
+   * @param {string} messageId - Message ID
+   * @returns {Promise<{buffer: Buffer, fileName: string, fileSize: number}>}
+   */
+  async downloadImage(imageKey, messageId) {
+    try {
+      console.log('[FeishuClient] Downloading image:', imageKey);
+
+      const res = await this.client.im.image.get({
+        path: {
+          image_key: imageKey
+        }
+      });
+
+      if (!res || !res.image) {
+        throw new Error('Failed to download image: no image data returned');
+      }
+
+      const buffer = res.image;
+      console.log('[FeishuClient] Image downloaded, size:', buffer.length, 'bytes');
+
+      // Generate filename with timestamp
+      const timestamp = Date.now();
+      const fileName = `image_${timestamp}.png`;
+
+      return {
+        buffer,
+        fileName,
+        fileSize: buffer.length
+      };
+
+    } catch (error) {
+      console.error('[FeishuClient] Failed to download image:', error.message);
+      throw error;
     }
   }
 

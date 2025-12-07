@@ -18,6 +18,7 @@ import { queryClaude } from './claude-cli.js';
 import { credentialsDb, userDb, feishuDb, initializeDatabase } from './database/db.js';
 import { contextManager } from './lib/context-manager.js';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -160,11 +161,66 @@ class FeishuService {
   }
 
   /**
+   * Handle file message (file/image/media upload)
+   */
+  async handleFileMessage(event, session, chatId, filePayload) {
+    console.log('[FeishuService] Handling file message:', filePayload);
+
+    try {
+      // Send confirmation
+      await this.client.sendTextMessage(chatId, '📥 收到文件，正在下载到工作目录...');
+
+      const { type, fileKey, fileName } = filePayload;
+      const messageId = event.message?.message_id;
+
+      let downloadResult;
+
+      // Download file based on type
+      if (type === 'image') {
+        downloadResult = await this.client.downloadImage(fileKey, messageId);
+      } else if (type === 'file' || type === 'media') {
+        downloadResult = await this.client.downloadFile(fileKey, messageId);
+      } else {
+        throw new Error(`不支持的文件类型: ${type}`);
+      }
+
+      // Save to project directory
+      const { buffer, fileName: finalFileName, fileSize } = downloadResult;
+      const filePath = path.join(session.project_path, finalFileName);
+
+      // Write file
+      fs.writeFileSync(filePath, buffer);
+
+      console.log('[FeishuService] File saved to:', filePath);
+
+      // Send success message
+      const sizeKB = (fileSize / 1024).toFixed(2);
+      await this.client.sendTextMessage(
+        chatId,
+        `✅ 文件已保存到工作目录：\n` +
+        `📄 文件名：${finalFileName}\n` +
+        `📂 路径：${filePath}\n` +
+        `💾 大小：${sizeKB} KB`
+      );
+
+      // Log to database
+      feishuDb.logMessage(session.id, 'incoming', type, `file:${finalFileName}`, messageId);
+      feishuDb.updateSessionActivity(session.id);
+
+      console.log('[FeishuService] File message handled successfully');
+
+    } catch (error) {
+      console.error('[FeishuService] Error handling file message:', error.message);
+      await this.client.sendTextMessage(chatId, `❌ 文件下载失败: ${error.message}`);
+    }
+  }
+
+  /**
    * Handle incoming message
    * This is the core message processing logic
    */
-  async handleMessage(event, userText) {
-    console.log('[FeishuService] Handling message:', userText);
+  async handleMessage(event, userText, filePayload = null) {
+    console.log('[FeishuService] Handling message:', userText || 'FILE');
 
     try {
       // Get or create session
@@ -173,6 +229,11 @@ class FeishuService {
 
       // Get chat ID for sending messages
       const chatId = this.sessionManager.getFeishuId(event);
+
+      // Handle file message
+      if (filePayload) {
+        return await this.handleFileMessage(event, session, chatId, filePayload);
+      }
 
       // Update active chat for file watcher
       if (this.fileWatcher) {
@@ -274,8 +335,8 @@ class FeishuService {
         console.log('[FeishuService] Paper command detected:', keyword);
 
         try {
-          const { PaperCommandHandler } = await import('./lib/paper-command-handler.js');
-          const handler = new PaperCommandHandler(this.client);
+          const { PaperHandler } = await import('../paper/lib/handler.js');
+          const handler = new PaperHandler(this.client);
           await handler.handle(chatId, keyword, session);
           return;
         } catch (error) {

@@ -145,4 +145,34 @@ dev-debug.log
 
 # Task files
 tasks.json
-tasks/ 
+tasks/
+
+# Third-party project clones
+gpt-researcher/
+storm/
+codex-*/
+auto/
+
+# Test and temporary files in root
+zhanglu_*/
+*.html
+!public/*.html
+send-audio-link.js
+test-*.js
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+cachedir_joblib/
+.storm_local_cache/
+
+# PDF downloads
+pdf/
+
+# Unix socket directories
+.X11-unix/
+.ICE-unix/
+.Test-unix/
+.XIM-unix/
+.font-unix/

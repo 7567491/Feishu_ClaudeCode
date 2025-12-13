@@ -33,17 +33,29 @@ export class FeishuClient {
     this.messageHandler = null;
     this.botInfo = null; // Bot's own info (to identify mentions)
 
-    // 无需@即可响应的群聊白名单（1-、2-、3-开头的群聊）
-    // 这些群聊中，任何用户消息都会触发机器人响应
-    this.noMentionRequiredChats = new Set([
-      'oc_8623156bb41f217a3822aca12362b068',  // 1-市场活动 (/home/event)
-      'oc_4a6d86d4fe64fba7300cd867611ad752',  // 2-案例库 (/home/case)
-      'oc_3de30cbfdd18839ccc2b4566db8d8a24',  // 3-WebX (/home/webx)
-      'oc_5d40b0cd98849b2c87ae950ec65e1de7',  // 会飞的CC (临时添加用于测试)
+    // ===== 黑名单模式：只有双机器人群需要@ =====
+    // 需要@才能响应的群聊（同时有"小六"和"AI初老师"的群）
+    // 空Set表示依赖运行时检测，也可以预先配置已知的双机器人群
+    this.mentionRequiredChats = new Set([
+      // 预配置的双机器人群（可选）
+      // 'oc_xxxxx', // 示例
     ]);
 
+    // 群成员缓存（用于检测是否为双机器人群）
+    // 格式: { chatId: { members: [...], lastUpdate: timestamp, hasBothBots: boolean } }
+    this.chatMemberCache = new Map();
+
+    // 缓存有效期（30分钟）
+    this.CACHE_EXPIRY = 30 * 60 * 1000;
+
+    // 双机器人的标识（根据name识别）
+    this.BOT_NAMES = {
+      xiaoliu: '小六',
+      aiteacher: 'AI初老师'
+    };
+
     console.log('[FeishuClient] Initialized with App ID:', this.appId);
-    console.log('[FeishuClient] No-mention-required chats:', this.noMentionRequiredChats.size);
+    console.log('[FeishuClient] Mention mode: Blacklist - Only dual-bot groups require @');
   }
 
   /**
@@ -120,8 +132,9 @@ export class FeishuClient {
         console.log('  Mentions:', JSON.stringify(event.message?.mentions, null, 2));
       }
 
-      // Check if this message is for the bot
-      if (!this.isMessageForBot(event)) {
+      // Check if this message is for the bot (异步方法)
+      const isForBot = await this.isMessageForBot(event);
+      if (!isForBot) {
         console.log('[FeishuClient] Message not for bot, skipping');
         return;
       }
@@ -192,12 +205,16 @@ export class FeishuClient {
 
   /**
    * Check if a message is for the bot
-   * Returns true for:
-   * - Private chats (chat_type === 'p2p')
-   * - Group chats in noMentionRequiredChats whitelist (无需@即可响应)
-   * - Group chats where bot is mentioned (不区分发送者是用户还是机器人)
+   *
+   * 黑名单模式：
+   * - Private chats: Always true
+   * - Group chats with both "小六" and "AI初老师": Requires @mention
+   * - All other group chats: Always true (no @ required)
+   *
+   * @param {Object} event - Feishu message event
+   * @returns {Promise<boolean>} true if message should be handled
    */
-  isMessageForBot(event) {
+  async isMessageForBot(event) {
     const message = event.message;
     if (!message) {
       console.log('[FeishuClient] isMessageForBot: No message object, returning false');
@@ -210,46 +227,46 @@ export class FeishuClient {
       return true;
     }
 
-    // Group chat - check whitelist first, then mentions
+    // Group chat - new blacklist logic
     if (message.chat_type === 'group') {
       const chatId = message.chat_id;
 
-      // 检查是否在无需@响应的白名单中
-      if (this.noMentionRequiredChats.has(chatId)) {
-        console.log('[FeishuClient] isMessageForBot: Chat in no-mention-required whitelist, returning true');
-        console.log('[FeishuClient] Chat ID:', chatId);
-        return true;
-      }
+      // Check if this is a dual-bot group (has both 小六 and AI初老师)
+      const hasBothBots = await this.checkIfBothBotsInChat(chatId);
 
-      // 其他群聊需要@才能响应
-      const mentions = message.mentions;
-      console.log('[FeishuClient] isMessageForBot: Group chat, mentions:', mentions?.length || 0);
+      if (hasBothBots) {
+        // Dual-bot group - requires @ to respond
+        console.log('[FeishuClient] isMessageForBot: Dual-bot group, checking mentions...');
 
-      if (!mentions || mentions.length === 0) {
-        console.log('[FeishuClient] isMessageForBot: No mentions, returning false');
-        return false;
-      }
-
-      // Check if bot is mentioned
-      // If we have bot's open_id, check for exact match
-      // Otherwise, accept any @ mention as potentially for us
-      if (this.botInfo?.open_id) {
-        console.log('[FeishuClient] isMessageForBot: Bot open_id exists, checking mentions...');
-        for (const mention of mentions) {
-          if (mention.id?.open_id === this.botInfo.open_id) {
-            console.log('[FeishuClient] isMessageForBot: Bot is mentioned, returning true');
-            return true;
-          }
-          if (mention.key === '@_all') {
-            console.log('[FeishuClient] isMessageForBot: @_all detected, returning true');
-            return true;
-          }
+        const mentions = message.mentions;
+        if (!mentions || mentions.length === 0) {
+          console.log('[FeishuClient] isMessageForBot: Dual-bot group but no mentions, returning false');
+          return false;
         }
-        console.log('[FeishuClient] isMessageForBot: Bot not mentioned, returning false');
-        return false;
+
+        // Check if bot is mentioned
+        if (this.botInfo?.open_id) {
+          for (const mention of mentions) {
+            if (mention.id?.open_id === this.botInfo.open_id) {
+              console.log('[FeishuClient] isMessageForBot: Bot is mentioned in dual-bot group, returning true');
+              return true;
+            }
+            if (mention.key === '@_all') {
+              console.log('[FeishuClient] isMessageForBot: @_all in dual-bot group, returning true');
+              return true;
+            }
+          }
+          console.log('[FeishuClient] isMessageForBot: Bot not mentioned in dual-bot group, returning false');
+          return false;
+        } else {
+          // No bot info - accept any mention
+          console.log('[FeishuClient] isMessageForBot: No bot open_id, accepting any mention in dual-bot group, returning true');
+          return true;
+        }
+
       } else {
-        // No bot info - accept any mention (包括来自机器人的@消息)
-        console.log('[FeishuClient] isMessageForBot: No bot open_id, accepting any mention, returning true');
+        // Not a dual-bot group - no @ required, always respond
+        console.log('[FeishuClient] isMessageForBot: Not a dual-bot group, returning true (no @ required)');
         return true;
       }
     }
@@ -257,6 +274,75 @@ export class FeishuClient {
     // Unknown chat type
     console.log('[FeishuClient] isMessageForBot: Unknown chat type:', message.chat_type);
     return false;
+  }
+
+  /**
+   * 检查群聊中是否同时有"小六"和"AI初老师"两个机器人
+   * 带缓存机制，避免频繁调用API
+   *
+   * @param {string} chatId - 群聊ID
+   * @returns {Promise<boolean>} true=双机器人群，false=非双机器人群
+   */
+  async checkIfBothBotsInChat(chatId) {
+    try {
+      // 1. 检查缓存
+      const cached = this.chatMemberCache.get(chatId);
+      const now = Date.now();
+
+      if (cached && (now - cached.lastUpdate) < this.CACHE_EXPIRY) {
+        console.log(`[FeishuClient] Using cached result for ${chatId}: hasBothBots=${cached.hasBothBots}`);
+        return cached.hasBothBots;
+      }
+
+      // 2. 缓存过期或不存在，调用API获取成员列表
+      console.log(`[FeishuClient] Cache miss/expired for ${chatId}, fetching members...`);
+      const members = await this.getChatMembers(chatId);
+
+      // 3. 检测是否同时存在两个机器人
+      const botNames = members
+        .filter(m => m.member_type === 'app')  // 只看机器人类型
+        .map(m => m.name);
+
+      console.log(`[FeishuClient] Found bots in ${chatId}:`, botNames);
+
+      const hasXiaoliu = botNames.some(name => name && name.includes(this.BOT_NAMES.xiaoliu));
+      const hasAITeacher = botNames.some(name => name && name.includes(this.BOT_NAMES.aiteacher));
+      const hasBothBots = hasXiaoliu && hasAITeacher;
+
+      console.log(`[FeishuClient] ${chatId} - 小六: ${hasXiaoliu}, AI初老师: ${hasAITeacher}, 双机器人: ${hasBothBots}`);
+
+      // 4. 更新缓存
+      this.chatMemberCache.set(chatId, {
+        members,
+        lastUpdate: now,
+        hasBothBots
+      });
+
+      return hasBothBots;
+
+    } catch (error) {
+      console.error(`[FeishuClient] Failed to check bots in chat ${chatId}:`, error.message);
+
+      // 出错时的降级策略：假设不是双机器人群（安全策略，避免漏回复）
+      console.log(`[FeishuClient] Error fallback: treating ${chatId} as non-dual-bot group`);
+      return false;
+    }
+  }
+
+  /**
+   * 手动刷新群聊成员缓存（供维护使用）
+   *
+   * @param {string} chatId - 群聊ID，如果不传则清空所有缓存
+   */
+  async refreshChatMemberCache(chatId = null) {
+    if (chatId) {
+      console.log(`[FeishuClient] Refreshing cache for chat: ${chatId}`);
+      this.chatMemberCache.delete(chatId);
+      await this.checkIfBothBotsInChat(chatId); // 重新获取
+    } else {
+      console.log('[FeishuClient] Clearing all chat member cache');
+      this.chatMemberCache.clear();
+    }
   }
 
   /**

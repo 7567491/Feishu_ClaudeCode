@@ -29,7 +29,6 @@
     "preview": "vite preview",
     "start": "npm run build && npm run server",
     "release": "./release.sh",
-    "feishu": "node server/feishu-ws.js",
     "test": "node test/server-restart-rca.test.js",
     "test:feishu": "node test/feishu/test-integration.js",
     "test:all": "npm run test && npm run test:feishu",

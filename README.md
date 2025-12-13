@@ -10,7 +10,10 @@
 - **📁 文件管理** - 交互式文件树，支持语法高亮和实时编辑
 - **🔄 Git 集成** - 查看、暂存、提交更改，切换分支
 - **🎯 会话管理** - 恢复对话，管理多个会话，追踪历史
-- **🤖 飞书集成** - WebSocket 模式接入飞书机器人，支持私聊和群聊
+- **🤖 飞书集成** - HTTP Webhook 模式接入飞书机器人，支持私聊和群聊
+  - **重要**：必须使用 HTTP Webhook 模式（不要使用 WebSocket 长连接）
+  - 飞书后台配置：事件与回调 → 订阅方式选择"将事件发送至开发者服务器"
+  - Webhook 地址：`https://your-domain/webhook`
   - 文件发送/Markdown 转飞书文档：直接执行，无前后铺垫提示
   - 消息与文件请求去重：同一 message_id 跳过，短时间重复文件请求冷却处理
   - 智能路径解析：自动处理相对路径、绝对路径和复杂路径，防止路径重复拼接
@@ -23,7 +26,7 @@
 
 ## 🏗️ 技术栈
 
-- **后端:** Node.js + Express + WebSocket + Feishu WebSocket SDK (@larksuiteoapi/node-sdk v1.55.0)
+- **后端:** Node.js + Express + HTTP Webhook + Feishu SDK (@larksuiteoapi/node-sdk v1.55.0)
 - **前端:** React 18 + Vite + CodeMirror + Tailwind CSS
 - **集成:** Claude CLI (gaccode 2.0.37) + SQLite 会话管理
 - **AI初老师:** Python Flask + 会话持久化 (端口 33301)
@@ -49,13 +52,11 @@ npm run build && npm run server
 
 ```bash
 # === 服务启动 ===
-npm run server          # 主 API 服务 (端口 33300)
-npm run feishu         # 飞书 WebSocket 服务
+npm run server          # 主 API 服务 (端口 33300，包含飞书 Webhook)
 cd teacher && python app.py  # AI初老师 (端口 33301)
 
 # === PM2 生产部署 ===
-pm2 start npm --name "claude-code-ui" -- run server
-pm2 start npm --name "feishu" -- run feishu
+pm2 start npm --name "claude-code-ui" -- run server  # 已包含飞书 Webhook
 cd teacher && pm2 start ecosystem.config.cjs
 pm2 save && pm2 startup  # 设置开机自启
 

@@ -1,18 +1,15 @@
 /**
  * Feishu REST API Routes
  *
- * Provides HTTP endpoints for managing the Feishu WebSocket service.
+ * Provides HTTP endpoints for Feishu session management.
+ * Note: The Feishu service now runs via HTTP Webhook (not WebSocket).
  * All endpoints require authentication.
  */
 
 import express from 'express';
-import { FeishuService } from '../feishu-ws.js';
 import { feishuDb } from '../database/db.js';
 
 const router = express.Router();
-
-// Singleton service instance
-let feishuService = null;
 
 /**
  * GET /api/feishu/status
@@ -20,19 +17,13 @@ let feishuService = null;
  */
 router.get('/status', async (req, res) => {
   try {
-    if (!feishuService) {
-      return res.json({
-        isRunning: false,
-        message: 'Service not initialized'
-      });
-    }
-
-    const status = feishuService.getStatus();
+    // Webhook mode is always running as part of main service
     res.json({
       success: true,
-      data: status
+      isRunning: true,
+      mode: 'webhook',
+      message: 'Feishu service runs via HTTP Webhook (integrated with main service)'
     });
-
   } catch (error) {
     console.error('[Feishu API] Error getting status:', error);
     res.status(500).json({
@@ -44,68 +35,24 @@ router.get('/status', async (req, res) => {
 
 /**
  * POST /api/feishu/start
- * Start the Feishu service
+ * Start the Feishu service (no-op in webhook mode)
  */
 router.post('/start', async (req, res) => {
-  try {
-    if (feishuService && feishuService.isRunning) {
-      return res.json({
-        success: true,
-        message: 'Service is already running'
-      });
-    }
-
-    // Create service if not exists
-    if (!feishuService) {
-      feishuService = new FeishuService();
-    }
-
-    // Start service
-    await feishuService.start();
-
-    res.json({
-      success: true,
-      message: 'Feishu service started successfully',
-      data: feishuService.getStatus()
-    });
-
-  } catch (error) {
-    console.error('[Feishu API] Error starting service:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
-  }
+  res.json({
+    success: true,
+    message: 'Feishu service runs via HTTP Webhook - always active when main service is running'
+  });
 });
 
 /**
  * POST /api/feishu/stop
- * Stop the Feishu service
+ * Stop the Feishu service (no-op in webhook mode)
  */
 router.post('/stop', async (req, res) => {
-  try {
-    if (!feishuService || !feishuService.isRunning) {
-      return res.json({
-        success: true,
-        message: 'Service is not running'
-      });
-    }
-
-    await feishuService.stop();
-
-    res.json({
-      success: true,
-      message: 'Feishu service stopped successfully'
-    });
-
-  } catch (error) {
-    console.error('[Feishu API] Error stopping service:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
+  res.json({
+    success: true,
+    message: 'Feishu service runs via HTTP Webhook - cannot be stopped separately'
+  });
 });
 
 /**
@@ -247,8 +194,9 @@ router.get('/health', (req, res) => {
   res.json({
     success: true,
     service: 'feishu',
+    mode: 'webhook',
     timestamp: new Date().toISOString(),
-    status: feishuService && feishuService.isRunning ? 'running' : 'stopped'
+    status: 'running'
   });
 });
 

@@ -531,9 +531,6 @@ async function handleMessageEvent(data) {
       }
     }
 
-    // 立即发送简单的确认消息，提升用户体验
-    await sendMessage(chatId, '收到');
-
     // Create message writer
     const writer = new FeishuMessageWriter(
       {

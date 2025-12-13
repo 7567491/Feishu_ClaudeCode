@@ -37,10 +37,10 @@ async function test1_checkCode() {
   const content = await fs.readFile(feishuWsPath, 'utf-8');
 
   const hasPaperCheck = content.includes("trimmedText.toLowerCase().startsWith('paper ')");
-  const hasPaperHandler = content.includes('PaperCommandHandler');
+  const hasPaperHandler = content.includes('PaperHandler');
 
   console.log('  ✓ paper 检测逻辑:', hasPaperCheck ? '存在' : '缺失');
-  console.log('  ✓ PaperCommandHandler 引用:', hasPaperHandler ? '存在' : '缺失');
+  console.log('  ✓ PaperHandler 引用:', hasPaperHandler ? '存在' : '缺失');
 
   if (!hasPaperCheck || !hasPaperHandler) {
     throw new Error('代码检查失败：paper 功能代码不完整');
@@ -88,11 +88,11 @@ async function test2_checkService() {
   });
 }
 
-// 测试 3: 检查 paper-command-handler.js 是否存在
+// 测试 3: 检查 paper/lib/handler.js 是否存在
 async function test3_checkHandler() {
-  console.log('测试 3: 检查 PaperCommandHandler 文件');
+  console.log('测试 3: 检查 PaperHandler 文件');
 
-  const handlerPath = path.join(projectRoot, 'server/lib/paper-command-handler.js');
+  const handlerPath = path.join(projectRoot, 'paper/lib/handler.js');
 
   try {
     const stats = await fs.stat(handlerPath);
@@ -102,14 +102,14 @@ async function test3_checkHandler() {
 
     // 读取内容检查关键方法
     const content = await fs.readFile(handlerPath, 'utf-8');
-    const hasHandleMethod = content.includes('async handle(chatId, keyword, session)');
-    const hasSubprocess = content.includes('callClaudeSubprocess');
+    const hasHandleMethod = content.includes('async handle(') || content.includes('async handlePaperCommand(');
+    const hasClass = content.includes('class PaperHandler') || content.includes('export class PaperHandler');
 
+    console.log('  ✓ PaperHandler 类:', hasClass ? '存在' : '缺失');
     console.log('  ✓ handle() 方法:', hasHandleMethod ? '存在' : '缺失');
-    console.log('  ✓ callClaudeSubprocess():', hasSubprocess ? '存在' : '缺失');
 
-    if (!hasHandleMethod || !hasSubprocess) {
-      throw new Error('PaperCommandHandler 代码不完整');
+    if (!hasClass || !hasHandleMethod) {
+      throw new Error('PaperHandler 代码不完整');
     }
 
     console.log('  ✅ 通过\n');
@@ -117,7 +117,7 @@ async function test3_checkHandler() {
   } catch (error) {
     if (error.code === 'ENOENT') {
       console.log('  ❌ 文件不存在:', handlerPath);
-      throw new Error('PaperCommandHandler 文件缺失');
+      throw new Error('PaperHandler 文件缺失');
     }
     throw error;
   }

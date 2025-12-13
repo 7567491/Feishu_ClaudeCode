@@ -35,11 +35,11 @@
 - 消息类型是 `Response sent` 而非 paper handler 的详细步骤
 
 ### 2️⃣ 为什么被 Claude 主会话处理？
-**答**: feishu-ws.js:265-286 的 paper 检测逻辑没有生效。
+**答**: feishu-ws.js:326-344 的 paper 检测逻辑没有生效。
 
 **验证**:
-- ✅ 代码存在（feishu-ws.js:265-286）
-- ✅ PaperCommandHandler 文件存在
+- ✅ 代码存在（feishu-ws.js:326-344）
+- ✅ PaperHandler 文件存在（paper/lib/handler.js）
 - ✅ 检测逻辑本身正确（通过单元测试验证）
 
 ### 3️⃣ 为什么检测逻辑没生效？

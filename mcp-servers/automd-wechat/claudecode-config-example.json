@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "automd-wechat": {
+      "command": "python3",
+      "args": [
+        "/home/ccp/mcp-servers/automd-wechat/server.py",
+        "--stdio"
+      ],
+      "description": "将 Markdown 文件发布到微信公众号草稿箱",
+      "env": {}
+    }
+  }
+}

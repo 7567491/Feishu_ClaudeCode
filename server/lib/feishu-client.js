@@ -39,6 +39,7 @@ export class FeishuClient {
       'oc_8623156bb41f217a3822aca12362b068',  // 1-市场活动 (/home/event)
       'oc_4a6d86d4fe64fba7300cd867611ad752',  // 2-案例库 (/home/case)
       'oc_3de30cbfdd18839ccc2b4566db8d8a24',  // 3-WebX (/home/webx)
+      'oc_5d40b0cd98849b2c87ae950ec65e1de7',  // 会飞的CC (临时添加用于测试)
     ]);
 
     console.log('[FeishuClient] Initialized with App ID:', this.appId);

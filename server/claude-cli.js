@@ -140,11 +140,16 @@ async function queryClaude(command, options = {}, ws) {
     activeClaudeProcesses.set(processKey, 'pending');
     console.log(`📝 Pre-registered session key: ${processKey}`);
 
+    // 🔧 使用 detached: true 让子进程独立于父进程的进程组
+    // 这样当 PM2 发送 SIGINT 重启服务时，信号不会传播到子进程
     const claudeProcess = spawnFunction(claudeCliPath, args, {
       cwd: workingDir,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: spawnEnv // Pass environment variables including CLAUDECODE_TOKEN
+      env: spawnEnv, // Pass environment variables including CLAUDECODE_TOKEN
+      detached: true // 防止信号传播到子进程
     });
+
+    // 注意：不调用 unref()，因为我们需要跟踪进程状态以便正确清理
 
     // Update with actual process object
     activeClaudeProcesses.set(processKey, claudeProcess);
@@ -340,17 +345,30 @@ async function queryClaude(command, options = {}, ws) {
 }
 
 function abortClaudeSession(sessionId) {
-  const process = activeClaudeProcesses.get(sessionId);
-  if (process) {
+  const childProcess = activeClaudeProcesses.get(sessionId);
+  if (childProcess) {
     console.log(`🛑 Aborting Claude session: ${sessionId}`);
     // Check if it's still in pending state (before process fully spawned)
-    if (process === 'pending') {
+    if (childProcess === 'pending') {
       console.log(`⚠️  Session ${sessionId} is still pending, removing from queue`);
       activeClaudeProcesses.delete(sessionId);
       return true;
     }
-    // Kill the actual process
-    process.kill('SIGTERM');
+    // 🔧 使用负数 PID 终止整个进程组（因为使用了 detached: true）
+    // 这确保子进程及其可能创建的孙进程都被终止
+    try {
+      // 先尝试终止进程组
+      process.kill(-childProcess.pid, 'SIGTERM');
+      console.log(`✅ Sent SIGTERM to process group ${childProcess.pid}`);
+    } catch (e) {
+      // 如果进程组终止失败，尝试直接终止进程
+      try {
+        childProcess.kill('SIGTERM');
+        console.log(`✅ Sent SIGTERM to process ${childProcess.pid}`);
+      } catch (e2) {
+        console.log(`⚠️  Process ${childProcess.pid} may have already exited`);
+      }
+    }
     activeClaudeProcesses.delete(sessionId);
     return true;
   }

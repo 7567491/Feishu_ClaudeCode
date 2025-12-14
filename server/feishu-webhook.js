@@ -11,8 +11,9 @@ import { FeishuSessionManager } from './lib/feishu-session.js';
 import { FeishuMessageWriter } from './lib/feishu-message-writer.js';
 import { FeishuFileHandler } from './lib/feishu-file-handler.js';
 import { GroupMemberCollector } from './lib/group-member-collector.js';
-import { queryClaude } from './claude-cli.js';
+import { queryClaude, abortClaudeSession, isClaudeSessionActive } from './claude-cli.js';
 import { credentialsDb, userDb, feishuDb, initializeDatabase } from './database/db.js';
+import { buildContextualMessage } from './lib/context-injection.js';
 
 // Global instances
 let client = null; // Lark client for basic API calls
@@ -22,8 +23,10 @@ let userId = null;
 let botOpenId = null; // Bot's own open_id for mention checking
 const processedMessages = new Map(); // messageId -> timestamp
 const recentFileRequests = new Map(); // chatId|file -> timestamp
+const contentDedup = new Map(); // chatId:content -> timestamp (内容去重)
 const MESSAGE_TTL_MS = 10 * 60 * 1000; // 10分钟内相同消息不重复处理
 const FILE_COOLDOWN_MS = 5 * 60 * 1000; // 5分钟内相同聊天同一文件不重复转化
+const CONTENT_DEDUP_WINDOW_MS = 5 * 1000; // 5秒内相同内容不重复处理
 
 /**
  * Get user's display name with fallback strategy:
@@ -177,6 +180,21 @@ async function handleMessageEvent(data) {
             processedMessages.delete(id);
           }
         }
+      }
+    }
+
+    // 🆕 检查消息时间戳：忽略5分钟前的旧消息（防止服务重启后处理积压消息）
+    const messageCreateTime = event.message?.create_time;
+    if (messageCreateTime) {
+      const createTimeMs = parseInt(messageCreateTime);
+      const messageAge = now - createTimeMs;
+      const MAX_MESSAGE_AGE_MS = 5 * 60 * 1000; // 5分钟
+
+      if (messageAge > MAX_MESSAGE_AGE_MS) {
+        console.log(`[FeishuWebhook] 🕐 忽略过期消息: ${Math.round(messageAge / 1000)}秒前的消息`);
+        console.log(`  消息ID: ${messageId}`);
+        console.log(`  创建时间: ${new Date(createTimeMs).toISOString()}`);
+        return;
       }
     }
 
@@ -364,6 +382,21 @@ async function handleMessageEvent(data) {
       return;
     }
 
+    // 🛑 方案2: /stop 命令显式中断
+    const STOP_COMMANDS = ['/stop', '!停止', '/停', '!stop'];
+    if (STOP_COMMANDS.some(cmd => userText.toLowerCase().startsWith(cmd))) {
+      console.log('[FeishuWebhook] 🛑 收到中断命令');
+      // 获取当前会话的 claude_session_id
+      const tempSession = await sessionManager.getOrCreateSession(event);
+      if (tempSession.claude_session_id && isClaudeSessionActive(tempSession.claude_session_id)) {
+        const aborted = abortClaudeSession(tempSession.claude_session_id);
+        await sendMessage(chatId, aborted ? '✅ 已中断当前任务' : '⚠️ 中断失败');
+      } else {
+        await sendMessage(chatId, '⚠️ 当前没有运行中的任务');
+      }
+      return;
+    }
+
     console.log('[FeishuWebhook] User text:', userText);
 
     // Get user nickname for directory prefix
@@ -531,6 +564,33 @@ async function handleMessageEvent(data) {
       }
     }
 
+    // 立即发送简单的确认消息，提升用户体验
+    await sendMessage(chatId, '收到');
+
+    // 🆕 内容去重：5秒内相同内容不重复调用Claude（但"收到"已发送）
+    const dedupSenderId = event.sender?.sender_id?.open_id || 'unknown';
+    const contentDedupKey = `${chatId}:${dedupSenderId}:${userText.trim()}`;
+    const lastContentTime = contentDedup.get(contentDedupKey);
+    const nowForDedup = Date.now();
+
+    if (lastContentTime && nowForDedup - lastContentTime < CONTENT_DEDUP_WINDOW_MS) {
+      console.log(`[FeishuWebhook] 🚫 内容去重: 5秒内重复消息，跳过Claude调用（已发送"收到"）`);
+      console.log(`  内容: "${userText.substring(0, 50)}${userText.length > 50 ? '...' : ''}"`);
+      console.log(`  上次处理时间: ${new Date(lastContentTime).toISOString()}`);
+      feishuDb.updateSessionActivity(session.id);
+      return;
+    }
+    contentDedup.set(contentDedupKey, nowForDedup);
+
+    // 清理过期的内容去重记录
+    if (contentDedup.size > 1000) {
+      for (const [key, ts] of contentDedup) {
+        if (nowForDedup - ts > CONTENT_DEDUP_WINDOW_MS * 2) {
+          contentDedup.delete(key);
+        }
+      }
+    }
+
     // Create message writer
     const writer = new FeishuMessageWriter(
       {
@@ -544,6 +604,24 @@ async function handleMessageEvent(data) {
       session.conversation_id
     );
 
+    // 🛑 方案3: 双消息自动中断（3秒超时判断）
+    // 如果有正在运行的任务，且距离上次消息超过3秒，自动中断旧任务
+    if (session.claude_session_id && isClaudeSessionActive(session.claude_session_id)) {
+      const lastActivity = session.last_activity ? new Date(session.last_activity).getTime() : 0;
+      const timeSinceLastMsg = Date.now() - lastActivity;
+      const AUTO_ABORT_THRESHOLD_MS = 3000; // 3秒阈值
+
+      if (timeSinceLastMsg > AUTO_ABORT_THRESHOLD_MS) {
+        console.log(`[FeishuWebhook] 🔄 检测到新消息（间隔 ${Math.round(timeSinceLastMsg/1000)}秒），自动中断旧任务`);
+        abortClaudeSession(session.claude_session_id);
+        await new Promise(r => setTimeout(r, 500)); // 等待进程清理
+        await sendMessage(chatId, '⏹️ 已中断上一个任务，正在处理新请求...');
+      } else {
+        // 3秒内的消息视为"补充"，直接追加处理（排队）
+        console.log(`[FeishuWebhook] ⏳ 检测到快速连续消息（间隔 ${timeSinceLastMsg}ms），排队等待...`);
+      }
+    }
+
     // Call Claude with context isolation
     const claudeOptions = {
       sessionId: session.claude_session_id,
@@ -552,9 +630,15 @@ async function handleMessageEvent(data) {
       projectPath: actualWorkingDir  // 🔧 Use detected actual working directory
     };
 
-    // 🔧 Add project context to prevent cross-project confusion
-    const contextPrefix = `[当前工作目录: ${actualWorkingDir}]\n[会话ID: ${session.conversation_id}]\n\n`;
-    const userTextWithContext = contextPrefix + userText;
+    // 🔧 使用上下文注入模块，提取最近 2 轮完整对话（用户消息+对应助手回复）
+    const userTextWithContext = buildContextualMessage(
+      session.id,
+      userText,
+      actualWorkingDir,
+      session.conversation_id,
+      { roundCount: 2 }  // 提取最近2轮完整对话
+    );
+    console.log('[FeishuWebhook] 📝 上下文注入完成（2轮完整对话）');
 
     console.log('[FeishuWebhook] Calling Claude...');
     console.log('[FeishuWebhook] Claude options:', JSON.stringify(claudeOptions, null, 2));
@@ -572,8 +656,11 @@ async function handleMessageEvent(data) {
       // Complete message
       await writer.complete();
 
-      // Log success
-      feishuDb.logMessage(session.id, 'outgoing', 'text', 'Response sent', null);
+      // Log success - 存储实际回复内容（截取前2000字符）
+      const responseContent = writer.collectedText
+        ? writer.collectedText.substring(0, 2000)
+        : 'Response sent';
+      feishuDb.logMessage(session.id, 'outgoing', 'text', responseContent, null);
       feishuDb.updateSessionActivity(session.id);
 
       console.log('[FeishuWebhook] Message handled successfully');

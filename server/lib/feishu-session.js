@@ -133,20 +133,11 @@ export class FeishuSessionManager {
     if (session) {
       console.log('[SessionManager] Existing session found:', session.id);
 
-      // Check if claude_session_id is still valid (important after service restart)
+      // 如果本地没有活跃进程，也不要清理会话 ID，避免每条消息都新建会话
+      // 只在远端明确返回 "No conversation found" 时清理（参见 feishu-webhook.js）
       if (session.claude_session_id) {
         const isStillActive = isClaudeSessionActive(session.claude_session_id);
-        console.log(`[SessionManager] Claude session ${session.claude_session_id} is ${isStillActive ? 'ACTIVE' : 'INACTIVE'}`);
-
-        // If session is no longer active (e.g., after service restart), clear it
-        if (!isStillActive) {
-          console.log(`[SessionManager] ⚠️  Clearing stale Claude session ID: ${session.claude_session_id}`);
-          console.log(`[SessionManager]   Reason: Session not in active processes (likely due to service restart)`);
-
-          // Clear the stale claude_session_id
-          this.updateClaudeSessionId(session.id, null);
-          session.claude_session_id = null;
-        }
+        console.log(`[SessionManager] Claude session ${session.claude_session_id} is ${isStillActive ? 'ACTIVE' : 'INACTIVE'} (will reuse if server accepts)`);
       }
 
       // Update last activity

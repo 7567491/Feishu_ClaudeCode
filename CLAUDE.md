@@ -304,7 +304,8 @@ sqlite3 server/database/auth.db "UPDATE feishu_sessions SET claude_session_id = 
 - ✅ **数据库层**：SQLite 存储 `claude_session_id` 和会话元数据
 - ✅ **会话管理层**：自动创建/恢复会话，独立工作目录（`./feicc/user-*/`）
 - ✅ **进程管理层**：Claude CLI 的 `--resume` 参数恢复历史上下文
-- ✅ **消息流转层**：WebSocket + Proxy API 双模式支持
+- ✅ **消息流转层**：HTTP Webhook 模式
+- ✅ **上下文注入层**：自动提取最近对话轮次作为提示词前缀
 
 **工作原理：**
 ```bash
@@ -325,6 +326,8 @@ sqlite3 server/database/auth.db "UPDATE feishu_sessions SET claude_session_id = 
 - ✅ 完整处理 `SIGTERM`、`SIGINT`、`SIGKILL` 等进程信号
 - ✅ 清晰的中文错误提示，准确反映终止原因
 - ✅ 进程注册采用预注册机制，消除竞态条件
+- ✅ **子进程隔离**：`spawn` 使用 `detached: true`，防止 PM2 信号传播到 Claude 进程
+- ✅ **进程组终止**：`abortClaudeSession` 使用负数 PID 终止整个进程组
 
 **服务重启后的会话恢复：**
 - ✅ 启动时自动清理过期的 `claude_session_id`（24小时未活跃）
@@ -334,8 +337,8 @@ sqlite3 server/database/auth.db "UPDATE feishu_sessions SET claude_session_id = 
 **典型修复场景：**
 ```bash
 # 场景1: PM2 重启后飞书对话报错 "SIGINT 进程被用户中断"
-# 原因：数据库中残留失效的 claude_session_id
-# 修复：启动时自动清理，无需手动干预
+# 原因：PM2 发送的 SIGINT 信号传播到 Claude 子进程
+# 修复：spawn 使用 detached: true，子进程独立于父进程的进程组
 
 # 场景2: 并发请求导致 "exit code null"
 # 原因：进程注册存在竞态条件
@@ -403,6 +406,7 @@ sqlite3 server/database/auth.db "UPDATE feishu_sessions SET claude_session_id = 
 | 飞书 Webhook 处理器 | `server/feishu-webhook.js` | 飞书 HTTP 回调处理（当前使用） |
 | 飞书客户端 | `server/lib/feishu-client.js` | 飞书 API 封装 |
 | 会话管理 | `server/lib/feishu-session.js` | 会话管理和数据库操作 |
+| 上下文注入 | `server/lib/context-injection.js` | 历史对话提取和提示词构建 |
 | Paper 主处理器 | `paper/lib/handler.js` | Paper 文献检索主处理器 |
 | Paper Claude 客户端 | `paper/lib/claude-client.js` | Claude 子进程封装 |
 | Paper 解析器 | `paper/lib/parser.js` | 论文表格解析器 |

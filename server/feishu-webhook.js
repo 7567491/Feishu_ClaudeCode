@@ -157,6 +157,107 @@ export async function initializeFeishuWebhook() {
 }
 
 /**
+ * 🆕 处理文件/图片消息下载
+ * @param {Object} event - 消息事件
+ * @param {Object} parsedContent - 解析后的消息内容
+ * @param {string} messageType - 消息类型 ('file' | 'image')
+ * @param {string} chatId - 聊天 ID
+ * @param {string} messageId - 消息 ID
+ */
+async function handleFileDownload(event, parsedContent, messageType, chatId, messageId) {
+  const fs = await import('fs/promises');
+  const path = await import('path');
+
+  try {
+    // 获取发送者信息
+    const senderId = event.sender?.sender_id?.open_id;
+    const chatType = event.message?.chat_type;
+
+    // 获取或创建会话
+    const conversationId = chatType === 'group' ? `group-${chatId}` : `user-${senderId}`;
+    let session = feishuDb.getSessionByConversation(conversationId);
+
+    if (!session) {
+      // 创建新会话
+      const projectPath = chatType === 'group'
+        ? `./feicc/group-${chatId.substring(0, 16)}`
+        : `./feicc/user-${senderId.substring(0, 16)}`;
+
+      session = feishuDb.getOrCreateSession(conversationId, chatType, senderId, projectPath);
+      console.log(`[FileDownload] 创建新会话: ${conversationId}`);
+    }
+
+    const workingDir = session.project_path;
+
+    // 确保工作目录存在
+    await fs.mkdir(workingDir, { recursive: true });
+
+    let savedPath;
+    let fileName;
+
+    if (messageType === 'file') {
+      // 处理文件消息
+      const fileKey = parsedContent.file_key;
+      fileName = parsedContent.file_name || 'unknown_file';
+
+      console.log(`[FileDownload] 下载文件: ${fileName} (key: ${fileKey})`);
+
+      // 调用飞书 API 下载文件
+      const fileData = await feishuClient.downloadFile(fileKey, messageId);
+
+      // 生成保存路径
+      savedPath = path.default.join(workingDir, fileName);
+
+      // 写入文件
+      await fs.writeFile(savedPath, fileData.buffer);
+
+      console.log(`[FileDownload] ✅ 文件已保存: ${savedPath} (${fileData.fileSize} bytes)`);
+
+    } else if (messageType === 'image') {
+      // 处理图片消息
+      const imageKey = parsedContent.image_key;
+      const timestamp = Date.now();
+      fileName = `image_${timestamp}.png`;
+
+      console.log(`[FileDownload] 下载图片: ${imageKey}`);
+
+      // 调用飞书 API 下载图片
+      const imageData = await feishuClient.downloadImage(imageKey, messageId);
+
+      // 如果 API 返回了文件名，使用它
+      if (imageData.fileName && imageData.fileName !== 'unknown') {
+        fileName = imageData.fileName;
+      }
+
+      // 生成保存路径
+      savedPath = path.default.join(workingDir, fileName);
+
+      // 写入文件
+      await fs.writeFile(savedPath, imageData.buffer);
+
+      console.log(`[FileDownload] ✅ 图片已保存: ${savedPath} (${imageData.fileSize} bytes)`);
+    }
+
+    // 记录消息日志
+    feishuDb.logMessage(session.id, 'incoming', messageType, `${messageType}:${fileName}`, senderId);
+
+    // 发送确认消息
+    const confirmMsg = `📥 已接收${messageType === 'file' ? '文件' : '图片'}: \`${fileName}\`\n📂 保存位置: \`${savedPath}\``;
+    await sendMessage(chatId, confirmMsg);
+
+    // 记录响应
+    feishuDb.logMessage(session.id, 'outgoing', 'text', confirmMsg, null);
+    feishuDb.updateSessionActivity(session.id);
+
+  } catch (error) {
+    console.error(`[FileDownload] ❌ 下载失败:`, error.message);
+
+    // 发送错误消息
+    await sendMessage(chatId, `❌ ${messageType === 'file' ? '文件' : '图片'}下载失败: ${error.message}`);
+  }
+}
+
+/**
  * Handle incoming message event
  */
 async function handleMessageEvent(data) {
@@ -264,6 +365,14 @@ async function handleMessageEvent(data) {
     } catch (error) {
       console.error('[FeishuWebhook] Failed to parse content:', error.message);
       return;
+    }
+
+    // 🆕 检测文件/图片消息类型并处理下载
+    const messageType = event.message?.message_type;
+    if (messageType === 'file' || messageType === 'image') {
+      console.log(`[FeishuWebhook] 📁 检测到${messageType === 'file' ? '文件' : '图片'}消息`);
+      await handleFileDownload(event, parsedContent, messageType, chatId, messageId);
+      return; // 文件消息处理完毕，不继续走文本流程
     }
 
     let userText = parsedContent.text || parsedContent.content || '';

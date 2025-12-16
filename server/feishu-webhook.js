@@ -14,6 +14,7 @@ import { GroupMemberCollector } from './lib/group-member-collector.js';
 import { queryClaude, abortClaudeSession, isClaudeSessionActive } from './claude-cli.js';
 import { credentialsDb, userDb, feishuDb, initializeDatabase } from './database/db.js';
 import { buildContextualMessage } from './lib/context-injection.js';
+import dualBotChecker from './lib/dual-bot-checker.js';
 
 // Global instances
 let client = null; // Lark client for basic API calls
@@ -153,6 +154,16 @@ export async function initializeFeishuWebhook() {
     botOpenId = null;
   }
 
+  // 🆕 初始化双机器人群检测器
+  try {
+    await dualBotChecker.initialize();
+    const stats = dualBotChecker.getStats();
+    console.log(`[FeishuWebhook] 双机器人群检测器已启动，双机器人群数: ${stats.dualBotGroupCount}`);
+  } catch (error) {
+    console.warn('[FeishuWebhook] 双机器人群检测器初始化失败:', error.message);
+    console.warn('[FeishuWebhook] 将使用保守策略（默认无需@）');
+  }
+
   console.log('[FeishuWebhook] Initialized successfully');
 }
 
@@ -175,7 +186,7 @@ async function handleFileDownload(event, parsedContent, messageType, chatId, mes
 
     // 获取或创建会话
     const conversationId = chatType === 'group' ? `group-${chatId}` : `user-${senderId}`;
-    let session = feishuDb.getSessionByConversation(conversationId);
+    let session = feishuDb.getSession(conversationId);
 
     if (!session) {
       // 创建新会话
@@ -219,7 +230,11 @@ async function handleFileDownload(event, parsedContent, messageType, chatId, mes
       const timestamp = Date.now();
       fileName = `image_${timestamp}.png`;
 
-      console.log(`[FileDownload] 下载图片: ${imageKey}`);
+      console.log(`[FileDownload] ========== 图片下载开始 ==========`);
+      console.log(`[FileDownload] 📷 image_key: ${imageKey}`);
+      console.log(`[FileDownload] 📨 message_id: ${messageId}`);
+      console.log(`[FileDownload] 💬 chat_id: ${chatId}`);
+      console.log(`[FileDownload] 📁 目标目录: ${workingDir}`);
 
       // 调用飞书 API 下载图片
       const imageData = await feishuClient.downloadImage(imageKey, messageId);
@@ -250,7 +265,10 @@ async function handleFileDownload(event, parsedContent, messageType, chatId, mes
     feishuDb.updateSessionActivity(session.id);
 
   } catch (error) {
-    console.error(`[FileDownload] ❌ 下载失败:`, error.message);
+    console.error(`[FileDownload] ========== 下载失败 ==========`);
+    console.error(`[FileDownload] ❌ 错误类型: ${error.name}`);
+    console.error(`[FileDownload] ❌ 错误消息: ${error.message}`);
+    console.error(`[FileDownload] ❌ 错误堆栈: ${error.stack}`);
 
     // 发送错误消息
     await sendMessage(chatId, `❌ ${messageType === 'file' ? '文件' : '图片'}下载失败: ${error.message}`);
@@ -401,28 +419,15 @@ async function handleMessageEvent(data) {
       console.log('  Mentions count:', mentions.length);
       console.log('  Mentions details:', JSON.stringify(mentions, null, 2));
 
-      // 🎯 新机制：根据群聊中机器人数量决定是否需要@
-      // 获取群成员统计信息（从缓存读取，性能很好）
-      const memberStats = feishuDb.getGroupMemberStats(chatId);
+      // 🎯 使用 DualBotChecker 判断是否为双机器人群
+      // 通过预加载的群列表交集判断，准确且高效
+      const isDualBot = dualBotChecker.isDualBotGroup(chatId);
+      const requireMention = isDualBot;
 
-      let requireMention = false; // 是否需要@才响应
-
-      if (memberStats) {
-        const botCount = memberStats.bot_count || 0;
-        console.log(`[FeishuWebhook] 📊 群聊统计: users=${memberStats.user_count}, bots=${botCount}`);
-
-        // 核心逻辑：只有当群聊中有2个或以上机器人时才需要@
-        if (botCount >= 2) {
-          requireMention = true;
-          console.log('[FeishuWebhook] 🤖 检测到多机器人环境 (≥2个机器人)，需要@才响应');
-        } else {
-          requireMention = false;
-          console.log('[FeishuWebhook] ✨ 单机器人环境 (<2个机器人)，无需@即可响应');
-        }
+      if (isDualBot) {
+        console.log(`[FeishuWebhook] 🤖 双机器人群 (${chatId})，需要@才响应`);
       } else {
-        // 如果无法获取统计信息，默认需要@（保守策略）
-        requireMention = true;
-        console.log('[FeishuWebhook] ⚠️  无法获取群成员信息，默认需要@才响应');
+        console.log(`[FeishuWebhook] ✨ 单机器人群 (${chatId})，无需@即可响应`);
       }
 
       // 根据是否需要@来决定处理流程

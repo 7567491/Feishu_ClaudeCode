@@ -643,6 +643,36 @@ const feishuDb = {
     }
   },
 
+  // Get message statistics for a session (optimized with SQL aggregation)
+  getMessageStats: (sessionId) => {
+    try {
+      const stats = db.prepare(`
+        SELECT
+          COUNT(*) as messageCount,
+          COALESCE(SUM(LENGTH(content)), 0) as totalChars,
+          COALESCE(AVG(LENGTH(content)), 0) as avgChars,
+          COALESCE(MAX(LENGTH(content)), 0) as maxChars
+        FROM feishu_message_log
+        WHERE session_id = ?
+      `).get(sessionId);
+
+      return {
+        messageCount: stats.messageCount || 0,
+        totalChars: stats.totalChars || 0,
+        avgChars: Math.round(stats.avgChars || 0),
+        maxChars: stats.maxChars || 0
+      };
+    } catch (err) {
+      console.error('[DB] getMessageStats error:', err);
+      return {
+        messageCount: 0,
+        totalChars: 0,
+        avgChars: 0,
+        maxChars: 0
+      };
+    }
+  },
+
   // Deactivate a session
   deactivateSession: (sessionId) => {
     try {

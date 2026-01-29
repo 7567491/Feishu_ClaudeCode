@@ -62,17 +62,26 @@ ${keyword}
           try {
             const message = JSON.parse(line);
 
-            if (message.type === 'assistant-message') {
-              const content = message.content || '';
-              fullResponse += content;
+            // 处理 assistant 消息（包含实际回复内容）
+            if (message.type === 'assistant' && message.message) {
+              const contentBlocks = message.message.content || [];
 
-              // 调用进度回调
-              if (onProgress && typeof onProgress === 'function') {
-                onProgress(content);
+              // 提取所有 text 类型的内容块
+              for (const block of contentBlocks) {
+                if (block.type === 'text') {
+                  const text = block.text || '';
+                  fullResponse += text;
+
+                  // 调用进度回调
+                  if (onProgress && typeof onProgress === 'function') {
+                    onProgress(text);
+                  }
+                }
               }
             }
 
-            if (message.type === 'done') {
+            // 处理最终结果（可选，用于记录完成状态）
+            if (message.type === 'result') {
               console.log('[ClaudeClient] Claude 子进程完成，输出长度:', fullResponse.length);
             }
           } catch (err) {

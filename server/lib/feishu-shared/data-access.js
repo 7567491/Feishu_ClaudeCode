@@ -27,6 +27,11 @@ class DataAccess {
     }
   }
 
+  // 获取最近的消息记录（按时间顺序）
+  static getRecentMessages(sessionId, limit = 20) {
+    return feishuDb.getMessageHistory(sessionId, limit);
+  }
+
   // 统计操作
   static getStatistics(timeRange = '24h') {
     return feishuDb.getStatistics(timeRange);

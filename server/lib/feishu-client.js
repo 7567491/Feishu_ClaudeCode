@@ -1340,20 +1340,31 @@ export class FeishuClient {
    */
   async downloadImage(imageKey, messageId) {
     try {
-      console.log('[FeishuClient] Downloading image:', imageKey);
+      console.log('[FeishuClient] ========== 图片下载 API 调用 ==========');
+      console.log('[FeishuClient] 📷 image_key:', imageKey);
+      console.log('[FeishuClient] 📨 message_id:', messageId);
+      console.log('[FeishuClient] 🔧 API 参数: { path: { image_key }, params: { image_type: "message" } }');
 
       const res = await this.client.im.image.get({
         path: {
           image_key: imageKey
+        },
+        params: {
+          image_type: 'message'  // 必需参数：消息中的图片类型
         }
       });
 
+      console.log('[FeishuClient] 📥 API 响应类型:', typeof res);
+      console.log('[FeishuClient] 📥 API 响应 keys:', res ? Object.keys(res) : 'null');
+
       if (!res || !res.image) {
+        console.error('[FeishuClient] ❌ 响应中无 image 字段');
+        console.error('[FeishuClient] 📋 完整响应:', JSON.stringify(res, null, 2).substring(0, 500));
         throw new Error('Failed to download image: no image data returned');
       }
 
       const buffer = res.image;
-      console.log('[FeishuClient] Image downloaded, size:', buffer.length, 'bytes');
+      console.log('[FeishuClient] ✅ 图片下载成功, 大小:', buffer.length, 'bytes');
 
       // Generate filename with timestamp
       const timestamp = Date.now();
@@ -1366,7 +1377,12 @@ export class FeishuClient {
       };
 
     } catch (error) {
-      console.error('[FeishuClient] Failed to download image:', error.message);
+      console.error('[FeishuClient] ❌ 图片下载失败');
+      console.error('[FeishuClient] 错误类型:', error.name);
+      console.error('[FeishuClient] 错误消息:', error.message);
+      console.error('[FeishuClient] 错误码:', error.code);
+      console.error('[FeishuClient] HTTP状态:', error.response?.status);
+      console.error('[FeishuClient] 响应数据:', JSON.stringify(error.response?.data || {}, null, 2));
       throw error;
     }
   }
@@ -1558,6 +1574,299 @@ export class FeishuClient {
 
     } catch (error) {
       console.error('[FeishuClient] 上传并分享失败:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Parse Bitable (Base) URL to extract app_token
+   * @param {string} url - Feishu base URL (e.g., https://xxx.feishu.cn/base/N47YbKJ7vaCfBRsB6LtcTlj7njd)
+   * @returns {string|null} app_token or null if parsing fails
+   */
+  parseBaseUrl(url) {
+    try {
+      // Match pattern: /base/{app_token}
+      const match = url.match(/\/base\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        console.log('[FeishuClient] 解析多维表格 URL 成功, app_token:', match[1]);
+        return match[1];
+      }
+      console.log('[FeishuClient] 无法解析多维表格 URL:', url);
+      return null;
+    } catch (error) {
+      console.error('[FeishuClient] 解析 URL 失败:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Get all tables in a Base (Bitable app)
+   * @param {string} appToken - Bitable app token
+   * @returns {Promise<Array>} Array of table objects with table_id, name, etc.
+   */
+  async getBaseTables(appToken) {
+    try {
+      console.log('[FeishuClient] 获取多维表格的数据表列表, app_token:', appToken);
+
+      const res = await this.client.bitable.appTable.list({
+        path: {
+          app_token: appToken
+        },
+        params: {
+          page_size: 100
+        }
+      });
+
+      if (res.code === 0) {
+        const tables = res.data?.items || [];
+        console.log('[FeishuClient] 获取到', tables.length, '个数据表');
+
+        // 打印表格列表
+        tables.forEach((table, index) => {
+          console.log(`  ${index + 1}. ${table.name} (${table.table_id})`);
+        });
+
+        return tables;
+      } else {
+        throw new Error(`获取数据表列表失败: ${res.code} - ${res.msg}`);
+      }
+
+    } catch (error) {
+      console.error('[FeishuClient] 获取数据表列表失败:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get records from a Base table
+   * @param {string} appToken - Bitable app token
+   * @param {string} tableId - Table ID
+   * @param {Object} options - Query options
+   * @returns {Promise<{records: Array, fields: Array}>}
+   */
+  async getBaseRecords(appToken, tableId, options = {}) {
+    try {
+      const {
+        pageSize = 100,
+        filter = null,
+        sort = null,
+        fieldNames = null
+      } = options;
+
+      console.log('[FeishuClient] 读取数据表记录, table_id:', tableId);
+
+      // 先获取字段信息
+      const fieldsRes = await this.client.bitable.appTableField.list({
+        path: {
+          app_token: appToken,
+          table_id: tableId
+        },
+        params: {
+          page_size: 100
+        }
+      });
+
+      if (fieldsRes.code !== 0) {
+        throw new Error(`获取字段信息失败: ${fieldsRes.code} - ${fieldsRes.msg}`);
+      }
+
+      const fields = fieldsRes.data?.items || [];
+      console.log('[FeishuClient] 获取到', fields.length, '个字段');
+
+      // 读取记录
+      const records = [];
+      let pageToken = null;
+      let hasMore = true;
+
+      while (hasMore) {
+        const params = {
+          page_size: pageSize
+        };
+
+        if (pageToken) {
+          params.page_token = pageToken;
+        }
+
+        if (filter) {
+          params.filter = filter;
+        }
+
+        if (sort) {
+          params.sort = sort;
+        }
+
+        if (fieldNames) {
+          params.field_names = fieldNames;
+        }
+
+        const res = await this.client.bitable.appTableRecord.list({
+          path: {
+            app_token: appToken,
+            table_id: tableId
+          },
+          params
+        });
+
+        if (res.code === 0) {
+          const items = res.data?.items || [];
+          records.push(...items);
+
+          hasMore = res.data?.has_more || false;
+          pageToken = res.data?.page_token || null;
+
+          console.log(`[FeishuClient] 已读取 ${records.length} 条记录...`);
+
+        } else {
+          throw new Error(`读取记录失败: ${res.code} - ${res.msg}`);
+        }
+      }
+
+      console.log('[FeishuClient] 读取完成，共', records.length, '条记录');
+
+      return {
+        records,
+        fields
+      };
+
+    } catch (error) {
+      console.error('[FeishuClient] 读取数据表记录失败:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Format Base records as Markdown table
+   * @param {Array} records - Array of record objects
+   * @param {Array} fields - Array of field objects
+   * @param {Object} options - Formatting options
+   * @returns {string} Markdown table
+   */
+  formatBaseRecordsAsMarkdown(records, fields, options = {}) {
+    try {
+      const {
+        maxRows = 100,
+        includeRecordId = false
+      } = options;
+
+      if (!records || records.length === 0) {
+        return '(空表格)';
+      }
+
+      // 构建表头
+      let headers = fields.map(f => f.field_name);
+      if (includeRecordId) {
+        headers = ['记录ID', ...headers];
+      }
+
+      // 构建分隔线
+      const separator = headers.map(() => '---');
+
+      // 构建数据行
+      const limitedRecords = records.slice(0, maxRows);
+      const rows = limitedRecords.map(record => {
+        const cells = fields.map(field => {
+          const value = record.fields[field.field_name];
+
+          // 处理不同类型的值
+          if (value === null || value === undefined) {
+            return '';
+          }
+
+          if (Array.isArray(value)) {
+            // 数组类型（如多选、人员等）
+            return value.map(v => {
+              if (typeof v === 'object') {
+                return v.text || v.name || JSON.stringify(v);
+              }
+              return String(v);
+            }).join(', ');
+          }
+
+          if (typeof value === 'object') {
+            // 对象类型（如人员、附件等）
+            return value.text || value.name || JSON.stringify(value);
+          }
+
+          // 转义 Markdown 特殊字符
+          return String(value)
+            .replace(/\|/g, '\\|')
+            .replace(/\n/g, ' ');
+        });
+
+        if (includeRecordId) {
+          return [record.record_id, ...cells];
+        }
+        return cells;
+      });
+
+      // 构建 Markdown 表格
+      const markdown = [
+        '| ' + headers.join(' | ') + ' |',
+        '| ' + separator.join(' | ') + ' |',
+        ...rows.map(row => '| ' + row.join(' | ') + ' |')
+      ].join('\n');
+
+      // 添加省略提示
+      if (records.length > maxRows) {
+        return markdown + `\n\n*显示前 ${maxRows} 条记录，共 ${records.length} 条*`;
+      }
+
+      return markdown;
+
+    } catch (error) {
+      console.error('[FeishuClient] 格式化 Markdown 表格失败:', error.message);
+      return '格式化失败: ' + error.message;
+    }
+  }
+
+  /**
+   * Read Base table from URL and return as Markdown
+   * @param {string} url - Feishu base URL
+   * @param {Object} options - Query and formatting options
+   * @returns {Promise<{markdown: string, tableInfo: Object}>}
+   */
+  async readBaseFromUrl(url, options = {}) {
+    try {
+      console.log('[FeishuClient] 从 URL 读取多维表格:', url);
+
+      // Parse URL
+      const appToken = this.parseBaseUrl(url);
+      if (!appToken) {
+        throw new Error('无效的多维表格 URL');
+      }
+
+      // Get tables
+      const tables = await this.getBaseTables(appToken);
+      if (!tables || tables.length === 0) {
+        throw new Error('未找到数据表');
+      }
+
+      // Use first table by default, or specified table
+      const tableId = options.tableId || tables[0].table_id;
+      const tableName = tables.find(t => t.table_id === tableId)?.name || '未知表格';
+
+      console.log('[FeishuClient] 使用数据表:', tableName);
+
+      // Get records
+      const { records, fields } = await this.getBaseRecords(appToken, tableId, options);
+
+      // Format as Markdown
+      const markdown = this.formatBaseRecordsAsMarkdown(records, fields, options);
+
+      return {
+        markdown,
+        tableInfo: {
+          appToken,
+          tableId,
+          tableName,
+          totalRecords: records.length,
+          totalFields: fields.length,
+          allTables: tables.map(t => ({ id: t.table_id, name: t.name }))
+        }
+      };
+
+    } catch (error) {
+      console.error('[FeishuClient] 读取多维表格失败:', error.message);
       throw error;
     }
   }

@@ -1,89 +1,27 @@
-# 张璐的任务待办清单应用
+# 张璐的任务待办清单
 
-## 项目简介
-这是一个简洁高效的任务待办清单Web应用，帮助用户管理日常工作和生活中的各项任务。应用采用现代化的界面设计，支持任务的创建、编辑、删除和状态管理，并提供优先级设置和筛选功能。
+## 功能
+- 单页HTML；顶部统计、输入区、状态筛选Tab、任务列表（倒序、完成标记）。
+- 新增/删除/状态切换，优先级高/中/低，支持手机端。
 
-## 在线访问
-- **访问地址**：https://s.linapp.fun/zhanglu_renwudaibanqingdan.html
-- **支持设备**：电脑、平板、手机等各类设备
-- **浏览器要求**：支持现代浏览器（Chrome、Firefox、Safari、Edge等）
-
-## 核心功能
-### 任务管理
-- **添加任务**：输入标题和描述，选择优先级后快速创建任务
-- **状态切换**：点击任务前的圆圈标记完成/未完成状态
-- **删除任务**：不需要的任务可以随时删除
-- **优先级设置**：支持高、中、低三个优先级，方便区分任务重要程度
-
-### 任务筛选与统计
-- **状态筛选**：可按"全部"、"待办"、"已完成"三种状态查看任务
-- **实时统计**：顶部显示任务总数、待办数量和已完成数量
-- **时间显示**：显示任务创建时间，便于追踪任务进度
-
-## 技术架构
-### 前端技术
-- **HTML5 + CSS3**：实现响应式布局和美观的界面效果
-- **原生JavaScript**：无需框架依赖，轻量高效
-- **移动端优化**：完美适配各种屏幕尺寸
-
-### 后端技术
-- **Python Flask**：轻量级Web框架，提供RESTful API
-- **JSON存储**：数据以JSON格式本地持久化存储
-- **PM2进程管理**：确保服务稳定运行，自动重启
-
-### 部署架构
-- **Nginx反向代理**：提供HTTPS访问和API代理
-- **端口管理**：后端服务运行在57014端口
-- **域名配置**：通过s.linapp.fun域名提供服务
-
-## 使用说明
-### 添加新任务
-1. 在顶部输入框输入任务标题
-2. 可选填写任务描述
-3. 选择优先级（高/中/低）
-4. 点击"添加任务"按钮或按回车键
-
-### 管理任务
-- 点击任务前的圆圈切换完成状态
-- 点击"删除"按钮移除任务
-- 使用顶部标签筛选不同状态的任务
-
-## 项目文件结构
-```
-zhanglu_31/
-├── index.html          # 前端页面
-├── app.py             # 后端Flask应用
-├── ecosystem.config.cjs # PM2配置文件
-├── nginx.conf         # Nginx配置参考
-├── data/              # 数据存储目录
-│   └── tasks.json     # 任务数据文件
-├── need.md            # 需求文档
-├── design.md          # 架构设计文档
-├── plan.md            # 开发计划文档
-└── README.md          # 项目说明文档
-```
-
-## 运维管理
-### 服务状态查看
+## 快速运行
 ```bash
-pm2 status zhanglu-todolist
-pm2 logs zhanglu-todolist
+cd /home/ccp/zhanglu_31
+python3 app.py  # 自动写入 /home/ccp/teacher/port.csv
+# pm2 start ecosystem.config.cjs
 ```
+接口：`/api/tasks`（GET/POST），`/api/tasks/<id>`（PUT/DELETE），`/api/tasks/stats`。
 
-### 服务重启
-```bash
-pm2 restart zhanglu-todolist
-```
+## 端口与存储
+- 端口从57001起递增查找并写表，当前：57004 -> zhanglu_31_tasks_json。
+- 数据：`data/tasks.json`（写前备份到 `data/backups/`，文件锁防并发）。
+- CORS开启，文本输出转义。
 
-### 数据备份
-任务数据自动备份到`data/backups/`目录，每次更新前自动创建备份文件。
+## Nginx/HTTPS
+- 静态页：`/zhanglu_renwudaibanqingdan.html` -> `/mnt/www`。
+- 代理：`/api/tasks` -> `http://localhost:57004`（端口变更需同步）。
+- 域名：`https://s.linapp.fun/zhanglu_renwudaibanqingdan.html`，当前访问返回Nginx 404，需上架静态文件并重载Nginx。
 
-## 后续优化方向
-- 添加任务提醒功能
-- 支持任务分类和标签
-- 实现数据导入导出
-- 集成日历视图
-- 支持多用户协作
-
-## 技术支持
-如有问题或建议，请联系项目维护人员。
+## 注意
+- 禁用 pm2 restart/stop/delete/kill/start 等命令，可用 `pm2 status|logs` 查看。
+- JSON结构兼容；异常统一JSON返回并打印日志。

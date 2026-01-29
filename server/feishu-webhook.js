@@ -15,19 +15,66 @@ import { queryClaude, abortClaudeSession, isClaudeSessionActive } from './claude
 import { credentialsDb, userDb, feishuDb, initializeDatabase } from './database/db.js';
 import { buildContextualMessage } from './lib/context-injection.js';
 import dualBotChecker from './lib/dual-bot-checker.js';
+import { SESSION_LIMITS, checkSessionLimits, shouldResetSession, truncatePrompt, getSessionStats } from './lib/session-limits.js';
 
 // Global instances
-let client = null; // Lark client for basic API calls
-let feishuClient = null; // FeishuClient for file operations
+let client = null; // Lark client for basic API calls (current context)
+let feishuClient = null; // FeishuClient for file operations (current context)
 let sessionManager = null;
 let userId = null;
-let botOpenId = null; // Bot's own open_id for mention checking
+let botOpenId = null; // Bot's own open_id for mention checking (current context)
+const botContexts = new Map(); // appId -> { client, feishuClient, sessionManager, botOpenId }
+const tokenToAppId = new Map(); // verification token -> appId
+let defaultAppId = null; // primary bot appId
 const processedMessages = new Map(); // messageId -> timestamp
 const recentFileRequests = new Map(); // chatId|file -> timestamp
 const contentDedup = new Map(); // chatId:content -> timestamp (内容去重)
 const MESSAGE_TTL_MS = 10 * 60 * 1000; // 10分钟内相同消息不重复处理
 const FILE_COOLDOWN_MS = 5 * 60 * 1000; // 5分钟内相同聊天同一文件不重复转化
 const CONTENT_DEDUP_WINDOW_MS = 5 * 1000; // 5秒内相同内容不重复处理
+
+function selectBotContext(event) {
+  const token = event?.header?.token || event?.token;
+  if (token && tokenToAppId.has(token)) {
+    const appId = tokenToAppId.get(token);
+    return botContexts.get(appId);
+  }
+
+  const appId = event?.header?.app_id;
+  if (appId && botContexts.has(appId)) {
+    return botContexts.get(appId);
+  }
+
+  // Fallback: 默认走 primary（小六）上下文
+  if (defaultAppId && botContexts.has(defaultAppId)) {
+    return botContexts.get(defaultAppId);
+  }
+
+  // Fallback to first context if available
+  const first = botContexts.values().next();
+  return first?.value || null;
+}
+
+/**
+ * Parse context management commands
+ * @param {string} text - User input text
+ * @returns {string|null} - Command type ('clear', 'reset', 'status') or null
+ */
+function parseContextCommand(text) {
+  const trimmed = text.trim().toLowerCase();
+
+  // /clear or /reset - Clear context
+  if (trimmed === '/clear' || trimmed === '/reset') {
+    return 'clear';
+  }
+
+  // /context status - Show context status
+  if (trimmed === '/context status' || trimmed === '/status' || trimmed === '/context') {
+    return 'status';
+  }
+
+  return null;
+}
 
 /**
  * Get user's display name with fallback strategy:
@@ -118,41 +165,91 @@ export async function initializeFeishuWebhook() {
     throw new Error('Feishu credentials not found');
   }
 
-  // Create client (for sending messages)
-  client = new lark.Client({
-    appId,
-    appSecret,
-    domain: lark.Domain.Feishu
-  });
-
-  // Create FeishuClient for file operations
-  feishuClient = new FeishuClient({
-    appId,
-    appSecret
-  });
-
-  // Create session manager
-  sessionManager = new FeishuSessionManager(userId, './feicc');
-
-  // Try to get bot info (bot's own open_id)
-  try {
-    // Method 1: Get from tenant access token endpoint
-    const botInfo = await client.auth.tenantAccessToken.internal({
-      data: { app_id: appId, app_secret: appSecret }
+  const createContext = async ({ id, secret, workdir = './feicc', label, token }) => {
+    const ctxClient = new lark.Client({
+      appId: id,
+      appSecret: secret,
+      domain: lark.Domain.Feishu
     });
 
-    // The bot's app_id can be used, but we need the bot's open_id
-    // Unfortunately, there's no direct API to get bot's open_id
-    // So we'll use the app_id as a fallback identifier
-    console.log('[FeishuWebhook] Bot App ID:', appId);
+    const ctxFeishuClient = new FeishuClient({
+      appId: id,
+      appSecret: secret
+    });
 
-    // Store app_id for comparison (some mention events use app_id)
-    botOpenId = appId;
-  } catch (error) {
-    console.warn('[FeishuWebhook] Could not get bot info:', error.message);
-    console.warn('[FeishuWebhook] Will accept any @mention in groups');
-    botOpenId = null;
+    const ctxSessionManager = new FeishuSessionManager(userId, workdir);
+    let ctxBotOpenId = null;
+
+    try {
+      await ctxClient.auth.tenantAccessToken.internal({
+        data: { app_id: id, app_secret: secret }
+      });
+      ctxBotOpenId = id; // fallback identifier
+      console.log(`[FeishuWebhook] (${label}) Bot App ID:`, id);
+    } catch (error) {
+      console.warn(`[FeishuWebhook] (${label}) Could not get bot info:`, error.message);
+      ctxBotOpenId = null;
+    }
+
+    const ctx = {
+      appId: id,
+      client: ctxClient,
+      feishuClient: ctxFeishuClient,
+      sessionManager: ctxSessionManager,
+      botOpenId: ctxBotOpenId,
+      label
+    };
+
+    botContexts.set(id, ctx);
+    if (token) {
+      tokenToAppId.set(token, id);
+    }
+    return ctx;
+  };
+
+  // Primary bot（小六）
+  const primaryCtx = await createContext({
+    id: appId,
+    secret: appSecret,
+    workdir: './feicc',
+    label: 'primary',
+    token: process.env.FeishuCC_Verification_Token
+  });
+  defaultAppId = primaryCtx.appId;
+
+  // Optional: 小曼
+  if (process.env.Feishu_Xiaoman_App_ID && process.env.Feishu_Xiaoman_App_Secret) {
+    const xiaomanCtx = await createContext({
+      id: process.env.Feishu_Xiaoman_App_ID,
+      secret: process.env.Feishu_Xiaoman_App_Secret,
+      workdir: './feicc-xiaoman',
+      label: 'xiaoman',
+      token: process.env.Feishu_Xiaoman_Verification_Token
+    });
+
+    console.log('[FeishuWebhook] 小曼上下文已初始化:', xiaomanCtx.appId);
   }
+
+  // Optional: AI初老师
+  if (process.env.Feishu_Teacher_App_ID && process.env.Feishu_Teacher_App_Secret) {
+    const teacherCtx = await createContext({
+      id: process.env.Feishu_Teacher_App_ID,
+      secret: process.env.Feishu_Teacher_App_Secret,
+      workdir: './feicc-teacher',
+      label: 'teacher',
+      token: process.env.Feishu_Teacher_Verification_Token
+    });
+
+    console.log('[FeishuWebhook] AI初老师上下文已初始化:', teacherCtx.appId);
+  }
+
+  // Set current context to primary by default
+  client = primaryCtx.client;
+  feishuClient = primaryCtx.feishuClient;
+  sessionManager = primaryCtx.sessionManager;
+  botOpenId = primaryCtx.botOpenId;
+
+  console.log('[FeishuWebhook] Token map initialized:', Array.from(tokenToAppId.keys()).map(k => `${k.substring(0, 6)}...`));
 
   // 🆕 初始化双机器人群检测器
   try {
@@ -281,6 +378,29 @@ async function handleFileDownload(event, parsedContent, messageType, chatId, mes
 async function handleMessageEvent(data) {
   try {
     const event = data.event || data;
+    // 兼容 Feishu 回调：header/token 可能在根节点
+    if (!event.header && data.header) {
+      event.header = data.header;
+    }
+    if (!event.token && data.token) {
+      event.token = data.token;
+    }
+    const ctx = selectBotContext(event);
+    if (!ctx) {
+      console.warn('[FeishuWebhook] No bot context available, skipping message');
+      return;
+    }
+
+    const eventAppId = event?.header?.app_id || 'unknown';
+    const eventToken = event?.header?.token || 'none';
+    console.log(`[FeishuWebhook] Using context for app_id: ${eventAppId} (token: ${eventToken?.substring(0, 6)}...) -> ${ctx.appId} [${ctx.label}]`);
+
+    // Switch active context for this event
+    client = ctx.client;
+    feishuClient = ctx.feishuClient;
+    sessionManager = ctx.sessionManager;
+    botOpenId = ctx.botOpenId;
+
     const messageId = event.message?.message_id;
     const chatId = event.message?.chat_id;
     const now = Date.now();
@@ -511,7 +631,201 @@ async function handleMessageEvent(data) {
       return;
     }
 
+    // 🔐 管理员专属命令：重启服务
+    // 仅允许张璐 (ou_a56e25820913cc1ee1e0ea35d9ffb497) 在私聊中执行
+    const ADMIN_OPEN_IDS = ['ou_a56e25820913cc1ee1e0ea35d9ffb497'];  // 张璐
+    const senderOpenId = event.sender?.sender_id?.open_id;
+    const isPrivateChat = chatType === 'p2p';
+    const isAdmin = ADMIN_OPEN_IDS.includes(senderOpenId);
+
+    const RESTART_COMMANDS = ['重启服务', '重启项目', '/restart', '!restart'];
+    if (RESTART_COMMANDS.some(cmd => userText.toLowerCase().includes(cmd.toLowerCase()))) {
+      console.log(`[FeishuWebhook] 🔄 收到重启命令，发送者: ${senderOpenId}, 私聊: ${isPrivateChat}, 管理员: ${isAdmin}`);
+
+      if (isPrivateChat && isAdmin) {
+        console.log('[FeishuWebhook] ✅ 管理员权限验证通过，执行重启');
+        await sendMessage(chatId, '🔄 正在重启服务，请稍候约 5 秒...');
+
+        // 异步执行重启，给当前响应留出时间
+        setTimeout(async () => {
+          const { exec } = await import('child_process');
+          exec('pm2 restart claude-code-ui', (error, stdout, stderr) => {
+            if (error) {
+              console.error('[FeishuWebhook] 重启失败:', error.message);
+            } else {
+              console.log('[FeishuWebhook] 重启成功:', stdout);
+            }
+          });
+        }, 1000);
+        return;
+      } else {
+        console.log('[FeishuWebhook] ❌ 权限不足，拒绝重启命令');
+        if (!isPrivateChat) {
+          await sendMessage(chatId, '⚠️ 重启命令仅支持私聊使用');
+        } else if (!isAdmin) {
+          await sendMessage(chatId, '⚠️ 您没有执行重启命令的权限');
+        }
+        return;
+      }
+    }
+
     console.log('[FeishuWebhook] User text:', userText);
+
+    // 🔧 清理 HTML 标签（飞书富文本消息可能包含 <p>、<a> 等标签）
+    const cleanText = userText.replace(/<[^>]+>/g, '').trim();
+
+    // 🆕 检测多维表格 URL
+    const baseUrlPattern = /https?:\/\/[^\s]+\/base\/[a-zA-Z0-9_-]+/;
+    const baseUrlMatch = cleanText.match(baseUrlPattern);
+    if (baseUrlMatch) {
+      const baseUrl = baseUrlMatch[0];
+      console.log('[FeishuWebhook] 📊 检测到多维表格 URL:', baseUrl);
+
+      try {
+        // 发送"正在读取"提示
+        await sendMessage(chatId, '📊 正在读取多维表格，请稍候...');
+
+        // 读取表格数据
+        const result = await feishuClient.readBaseFromUrl(baseUrl, {
+          maxRows: 50  // 限制显示50条，避免消息过长
+        });
+
+        // 构建响应消息
+        const { markdown, tableInfo } = result;
+        let responseText = `📊 **${tableInfo.tableName}**\n\n`;
+        responseText += `📈 共 ${tableInfo.totalRecords} 条记录，${tableInfo.totalFields} 个字段\n\n`;
+
+        // 如果有多个数据表，列出所有表
+        if (tableInfo.allTables.length > 1) {
+          responseText += `📑 该多维表格包含以下数据表：\n`;
+          tableInfo.allTables.forEach((table, index) => {
+            const isCurrent = table.id === tableInfo.tableId;
+            responseText += `  ${index + 1}. ${table.name}${isCurrent ? ' (当前)' : ''}\n`;
+          });
+          responseText += `\n`;
+        }
+
+        responseText += markdown;
+
+        await sendMessage(chatId, responseText);
+
+      } catch (error) {
+        console.error('[FeishuWebhook] 读取多维表格失败:', error.message);
+        await sendMessage(
+          chatId,
+          `❌ 读取多维表格失败: ${error.message}\n\n` +
+          `💡 可能的原因：\n` +
+          `1. 机器人没有访问该表格的权限\n` +
+          `2. URL 格式不正确\n` +
+          `3. 表格已被删除或移动\n\n` +
+          `请检查表格权限设置，或联系管理员。`
+        );
+      }
+
+      return; // 处理完毕，不继续走 Claude 流程
+    }
+
+    // 【新增】小曼机器人全量路由到 Codex（无需关键词）
+    const isXiaomanContext = (ctx?.label === 'xiaoman') ||
+      (process.env.Feishu_Xiaoman_App_ID && ctx?.appId === process.env.Feishu_Xiaoman_App_ID) ||
+      (process.env.Feishu_Xiaoman_App_ID && eventAppId === process.env.Feishu_Xiaoman_App_ID);
+    console.log('[FeishuWebhook] Xiaoman check:', {
+      label: ctx?.label,
+      ctxApp: ctx?.appId,
+      eventAppId,
+      hasEnv: !!process.env.Feishu_Xiaoman_App_ID,
+      isXiaomanContext
+    });
+
+    if (isXiaomanContext) {
+      const actualMessage = userText.trim();
+      if (!actualMessage) {
+        await sendMessage(chatId, '请直接输入你的问题');
+        return;
+      }
+
+      console.log('[FeishuWebhook] 🤖 Xiaoman context detected, routing to Codex Proxy');
+      try {
+        const response = await fetch('http://localhost:33300/api/codex-proxy/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: actualMessage,
+            chatId: chatId,
+            fromBot: 'FeishuWebhook/Xiaoman'
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        }
+
+        const result = await response.json();
+        console.log('[FeishuWebhook] ✅ Codex query dispatched (Xiaoman), sessionId:', result.sessionId);
+      } catch (error) {
+        console.error('[FeishuWebhook] ❌ Failed to dispatch Xiaoman to Codex:', error.message);
+        await sendMessage(
+          chatId,
+          `❌ 小曼调用失败: ${error.message}\n请稍后重试或联系管理员。`
+        );
+      }
+
+      return; // 小曼不再继续走 Claude
+    }
+
+    // 【新增】检测小曼关键词
+    const codexKeywords = ['codex ', '小曼 ', 'Codex ', '小曼：'];
+    const isCodexRequest = codexKeywords.some(kw => userText.startsWith(kw));
+
+    if (isCodexRequest) {
+      console.log('[FeishuWebhook] 🤖 Routing to Codex (keyword detected)');
+
+      // 提取实际消息（去除关键词前缀）
+      let actualMessage = userText;
+      for (const kw of codexKeywords) {
+        if (userText.startsWith(kw)) {
+          actualMessage = userText.substring(kw.length).trim();
+          break;
+        }
+      }
+
+      if (!actualMessage) {
+        await sendMessage(
+          chatId,
+          '请在关键词后输入你的问题，例如："小曼 写一个 Python 函数"'
+        );
+        return;
+      }
+
+      // 调用 Codex Proxy
+      try {
+        const response = await fetch('http://localhost:33300/api/codex-proxy/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: actualMessage,
+            chatId: chatId,
+            fromBot: 'FeishuWebhook'
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        }
+
+        const result = await response.json();
+        console.log('[FeishuWebhook] ✅ Codex query dispatched, sessionId:', result.sessionId);
+
+      } catch (error) {
+        console.error('[FeishuWebhook] ❌ Failed to dispatch to Codex:', error.message);
+        await sendMessage(
+          chatId,
+          `❌ 小曼调用失败: ${error.message}\n请稍后重试或联系管理员。`
+        );
+      }
+
+      return; // 不再继续处理（不调用 Claude）
+    }
 
     // Get user nickname for directory prefix
     const senderId = event.sender?.sender_id?.open_id;
@@ -571,6 +885,61 @@ async function handleMessageEvent(data) {
       userText,
       event.message?.message_id
     );
+
+    // 🆕 Check if this is a context management command
+    const contextCommand = parseContextCommand(userText);
+    if (contextCommand) {
+      console.log('[FeishuWebhook] Context command detected:', contextCommand);
+
+      if (contextCommand === 'clear' || contextCommand === 'reset') {
+        // Clear current session context
+        const hadSession = !!session.claude_session_id;
+        sessionManager.updateClaudeSessionId(session.id, null);
+
+        // Get context stats before clearing
+        const stats = getSessionStats(feishuDb, session.id);
+
+        const message = hadSession
+          ? `✅ 上下文已清空\n\n📊 清空前统计:\n- 消息数: ${stats.messageCount}\n- 对话轮次: ${Math.floor(stats.messageCount / 2)}\n\n💡 下次发送消息时，将自动创建新会话。`
+          : `ℹ️ 当前会话已经是空白状态，无需清空。`;
+
+        await sendMessage(chatId, message);
+        feishuDb.logMessage(session.id, 'outgoing', 'text', message, null);
+        feishuDb.updateSessionActivity(session.id);
+        return;
+      }
+
+      if (contextCommand === 'status') {
+        // Show context status
+        const stats = getSessionStats(feishuDb, session.id);
+        const hasActiveSession = !!session.claude_session_id;
+
+        // Estimate tokens (1 token ≈ 2.5 characters for Chinese)
+        const estimatedTokens = Math.ceil(stats.totalChars / 2.5);
+        const usageRatio = ((estimatedTokens / 200000) * 100).toFixed(2);
+
+        const statusMessage = `📊 当前上下文状态\n\n` +
+          `会话ID: ${session.conversation_id.substring(0, 20)}...\n` +
+          `Claude会话: ${hasActiveSession ? '✅ 活跃' : '❌ 未激活'}\n` +
+          `工作目录: ${session.project_path}\n\n` +
+          `📈 上下文统计:\n` +
+          `- 消息总数: ${stats.messageCount}\n` +
+          `- 总字符数: ${stats.totalChars.toLocaleString()}\n` +
+          `- 平均长度: ${stats.avgChars} 字符/条\n` +
+          `- 最长消息: ${stats.maxChars} 字符\n\n` +
+          `🔢 Token估算:\n` +
+          `- 估算tokens: ${estimatedTokens.toLocaleString()}\n` +
+          `- 使用率: ${usageRatio}% (200K上限)\n\n` +
+          `💡 提示:\n` +
+          `- 发送 /clear 清空上下文\n` +
+          `- 建议消息数超过 500 时清理`;
+
+        await sendMessage(chatId, statusMessage);
+        feishuDb.logMessage(session.id, 'outgoing', 'text', statusMessage, null);
+        feishuDb.updateSessionActivity(session.id);
+        return;
+      }
+    }
 
     // Check if this is a markdown convert command
     const convertCommand = FeishuFileHandler.parseConvertCommand(userText);
@@ -744,16 +1113,69 @@ async function handleMessageEvent(data) {
       projectPath: actualWorkingDir  // 🔧 Use detected actual working directory
     };
 
-    // 🔧 使用上下文注入模块，提取最近 2 轮完整对话（用户消息+对应助手回复）
-    const userTextWithContext = buildContextualMessage(
-      session.id,
-      userText,
-      actualWorkingDir,
-      session.conversation_id,
-      { roundCount: 2 }  // 提取最近2轮完整对话
-    );
-    console.log('[FeishuWebhook] 📝 上下文注入完成（2轮完整对话）');
+    // 🔧 会话限制检查（根据 docs/long.md RCA）
+    const sessionStats = getSessionStats(feishuDb, session.id);
+    const limitCheck = checkSessionLimits({
+      messageCount: sessionStats.messageCount,
+      promptLength: userText.length  // 预估，实际会包含上下文
+    });
 
+    if (limitCheck.needsReset) {
+      console.log(`[FeishuWebhook] ⚠️ 会话超限: ${limitCheck.reason}`);
+      console.log(`[FeishuWebhook] 🔄 自动重置会话 (消息数: ${sessionStats.messageCount})`);
+      sessionManager.updateClaudeSessionId(session.id, null);
+      claudeOptions.sessionId = null;
+      // 注意：自动刷新不发送飞书通知（避免打扰用户），仅记录日志
+      // 用户可通过 /status 命令主动查看会话状态
+    }
+
+    // 🔧 智能上下文注入：优先保留用户当前输入，避免截断用户消息
+    let userTextWithContext;
+    const userInputLength = userText.length;
+
+    // 策略1: 如果用户输入本身就很长（超过80%限制），直接跳过历史上下文
+    if (userInputLength > SESSION_LIMITS.MAX_PROMPT_LENGTH * 0.8) {
+      console.log(`[FeishuWebhook] 📝 用户输入较长 (${userInputLength} 字符)，跳过历史上下文注入`);
+      // 只添加基本信息，不加历史上下文
+      userTextWithContext = `[当前工作目录: ${actualWorkingDir}]\n[会话ID: ${session.conversation_id}]\n\n### 当前问题:\n\n${userText}`;
+    } else {
+      // 策略2: 正常加上下文（2轮对话）
+      userTextWithContext = buildContextualMessage(
+        session.id,
+        userText,
+        actualWorkingDir,
+        session.conversation_id,
+        { roundCount: 2 }
+      );
+
+      // 策略3: 如果加上上下文后超限，逐步减少上下文
+      if (userTextWithContext.length > SESSION_LIMITS.MAX_PROMPT_LENGTH) {
+        console.log(`[FeishuWebhook] ⚠️ 加上上下文后过长 (${userTextWithContext.length} > ${SESSION_LIMITS.MAX_PROMPT_LENGTH})，尝试减少上下文`);
+
+        // 尝试只用1轮上下文
+        userTextWithContext = buildContextualMessage(
+          session.id,
+          userText,
+          actualWorkingDir,
+          session.conversation_id,
+          { roundCount: 1 }
+        );
+
+        // 策略4: 如果还是超限，完全不加历史上下文
+        if (userTextWithContext.length > SESSION_LIMITS.MAX_PROMPT_LENGTH) {
+          console.log(`[FeishuWebhook] ⚠️ 仍然过长，完全跳过历史上下文注入`);
+          userTextWithContext = `[当前工作目录: ${actualWorkingDir}]\n[会话ID: ${session.conversation_id}]\n\n### 当前问题:\n\n${userText}`;
+        } else {
+          console.log(`[FeishuWebhook] ✅ 使用1轮上下文 (总长度: ${userTextWithContext.length})`);
+        }
+      } else {
+        console.log(`[FeishuWebhook] ✅ 使用2轮上下文 (总长度: ${userTextWithContext.length})`);
+      }
+    }
+
+    console.log('[FeishuWebhook] 📝 上下文注入完成，用户输入完整保留');
+
+    // 如果当前上下文是小曼（Codex），直接转发到 codex-proxy，保持小六走 Claude
     console.log('[FeishuWebhook] Calling Claude...');
     console.log('[FeishuWebhook] Claude options:', JSON.stringify(claudeOptions, null, 2));
     console.log('[FeishuWebhook] 🔐 Session isolation - Conversation:', session.conversation_id);
@@ -788,6 +1210,11 @@ async function handleMessageEvent(data) {
         sessionManager.updateClaudeSessionId(session.id, null);
         await sendMessage(chatId, `🔄 会话已过期，正在创建新会话...\n\n${userText}`);
         // Note: The retry will happen on the next user message
+      } else if (shouldResetSession(error.message)) {
+        // 🔧 "Prompt is too long" 错误自动恢复（根据 docs/long.md RCA）
+        console.log('[FeishuWebhook] 🔄 检测到 Prompt 过长错误，自动重置会话');
+        sessionManager.updateClaudeSessionId(session.id, null);
+        await sendMessage(chatId, `🔄 上下文过长，已自动刷新会话。请重新发送您的问题。`);
       } else {
         await sendMessage(chatId, `❌ 处理失败: ${error.message}`);
       }
@@ -834,18 +1261,40 @@ async function sendMessage(chatId, text) {
  */
 export function createWebhookHandler() {
   // Get encryption key if configured
-  const encryptKey = process.env.FeishuCC_Encrypt_Key || '';
+  const keyCandidates = [
+    process.env.FeishuCC_Encrypt_Key,
+    process.env.Feishu_Xiaoman_Encrypt_Key,
+    process.env.Feishu_Teacher_Encrypt_Key
+  ].filter(k => k && k.trim() && k.trim().toLowerCase() !== 'na');
 
-  // Create EventDispatcher
-  const eventDispatcher = new lark.EventDispatcher({
-    encryptKey,
-    loggerLevel: lark.LoggerLevel.debug
-  }).register({
-    'im.message.receive_v1': handleMessageEvent
-  });
+  const encryptKey = keyCandidates[0] || '';
+  const validTokens = [
+    process.env.FeishuCC_Verification_Token,
+    process.env.Feishu_Xiaoman_Verification_Token,
+    process.env.Feishu_Teacher_Verification_Token
+  ].filter(Boolean);
 
-  // Return Express middleware
-  return lark.adaptExpress(eventDispatcher, {
-    autoChallenge: true  // Automatically handle URL verification
-  });
+  // Return Express middleware (manual verification to support multiple bots)
+  return async (req, res) => {
+    try {
+      const body = req.body || {};
+      const token = body?.header?.token || body?.token;
+
+      if (validTokens.length > 0 && !validTokens.includes(token)) {
+        console.warn('[FeishuWebhook] Verification token mismatch (allowing for multi-bot setup)');
+      }
+
+      // URL verification
+      if (body?.type === 'url_verification' || body?.challenge) {
+        return res.json({ challenge: body.challenge });
+      }
+
+      // Encrypted payloads are not used now; encryptKey kept for compatibility
+      await handleMessageEvent(body);
+      res.json({ status: 'ok' });
+    } catch (error) {
+      console.error('[FeishuWebhook] Middleware error:', error.message);
+      res.status(500).send('error');
+    }
+  };
 }

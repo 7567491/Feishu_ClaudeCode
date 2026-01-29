@@ -37,6 +37,44 @@ app = Flask(__name__)
 feishu_client = None
 ai_teacher = None
 
+# 消息去重缓存（event_id -> 处理时间）
+# 飞书消息重试机制可能在数小时内多次推送同一条消息
+import time
+from collections import OrderedDict
+
+class MessageDeduplicator:
+    """消息去重器，使用LRU缓存已处理的event_id"""
+    def __init__(self, max_size=1000, ttl_hours=24):
+        self.cache = OrderedDict()
+        self.max_size = max_size
+        self.ttl = ttl_hours * 3600  # 转换为秒
+
+    def is_duplicate(self, event_id: str) -> bool:
+        """检查是否为重复消息"""
+        now = time.time()
+
+        # 清理过期条目
+        expired_keys = [k for k, v in self.cache.items() if now - v > self.ttl]
+        for k in expired_keys:
+            del self.cache[k]
+
+        # 检查是否存在
+        if event_id in self.cache:
+            logger.warning(f"[Dedup] 检测到重复消息，跳过处理: event_id={event_id}")
+            return True
+
+        # 添加到缓存
+        self.cache[event_id] = now
+
+        # 超过最大容量时移除最旧的
+        while len(self.cache) > self.max_size:
+            self.cache.popitem(last=False)
+
+        return False
+
+# 创建去重器实例
+message_dedup = MessageDeduplicator()
+
 
 def initialize():
     """初始化服务"""
@@ -78,6 +116,11 @@ def webhook():
         # 处理URL验证
         if data.get("type") == "url_verification":
             return jsonify({"challenge": data.get("challenge")})
+
+        # 消息去重检查
+        event_id = data.get("header", {}).get("event_id") or data.get("uuid")
+        if event_id and message_dedup.is_duplicate(event_id):
+            return jsonify({"status": "duplicate", "event_id": event_id})
 
         # 处理事件 (兼容v2.0格式)
         event_data = None

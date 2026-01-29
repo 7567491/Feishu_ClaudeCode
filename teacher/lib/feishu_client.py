@@ -104,7 +104,7 @@ class FeishuClient:
             while True:
                 params = {
                     "member_id_type": "open_id",
-                    "page_size": 200
+                    "page_size": 100  # 飞书API限制最大100
                 }
                 if page_token:
                     params["page_token"] = page_token

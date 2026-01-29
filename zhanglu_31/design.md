@@ -1,98 +1,25 @@
-# 任务待办清单架构设计文档
+# 架构设计文档（张璐任务待办清单）
 
-## 系统架构概述
-采用前后端分离的架构模式，前端使用单页HTML应用，后端采用Python Flask框架提供RESTful API，数据以JSON格式本地存储。
+## 总体
+单页HTML + Flask API + JSON，Nginx 提供页面与反代。启动时按 `/home/ccp/teacher/port.csv` 从57001起选可用端口并登记。
 
-## 技术栈选择
-- **前端**：HTML5 + CSS3 + JavaScript (原生)
-- **后端**：Python 3.10 + Flask 2.x
-- **数据存储**：JSON文件
-- **Web服务器**：Nginx (反向代理)
-- **进程管理**：PM2
+## 前端
+- 纯HTML/CSS/JS内联。
+- 区块：顶部统计、输入区、状态Tab、任务列表（倒序，完成标记）。
+- 交互：圆圈勾选切换、删除；移动端流式。
 
-## 前端设计
+## 后端
+- Flask + CORS。
+- 端口：读取 `port.csv`；如已有本应用且端口空闲则复用，否则自57001起跳过已记录或占用端口，找到空闲端口后追加 `port,app_name,user,created_at`。
+- API：`GET/POST /api/tasks`、`PUT/DELETE /api/tasks/<id>`、`GET /api/tasks/stats`。
+- 数据模型：id、title、description、priority(high|medium|low)、status(pending|completed)、created_at、completed_at、updated_at。
+- 持久化：`data/tasks.json`，读写加fcntl锁，写前备份到 `data/backups/`，标题必填。
 
-### 界面布局
-```
-+------------------+
-|    页面标题      |
-+------------------+
-|  新增任务输入框  |
-+------------------+
-|  任务筛选标签    |
-+------------------+
-|   任务列表区     |
-|  - 待办任务      |
-|  - 已完成任务    |
-+------------------+
-```
+## 运维
+- 静态页：`/zhanglu_renwudaibanqingdan.html`（/mnt/www）。
+- 代理：`/api/tasks` 指向运行端口，需与 port.csv 同步。
+- HTTPS：`https://s.linapp.fun/zhanglu_renwudaibanqingdan.html`。
+- 进程：PM2 守护 `python3 app.py`。
 
-### 关键组件
-- **任务输入组件**：包含标题、描述、优先级选择
-- **任务列表组件**：展示所有任务，支持编辑、删除、标记完成
-- **筛选组件**：按状态和优先级筛选任务
-
-### 响应式设计
-- 使用CSS Grid和Flexbox实现自适应布局
-- 移动端优先设计，确保手机端良好体验
-- 触摸优化，按钮尺寸适配手指操作
-
-## 后端设计
-
-### API接口设计
-```
-GET    /api/tasks          # 获取所有任务
-POST   /api/tasks          # 创建新任务
-PUT    /api/tasks/{id}     # 更新任务
-DELETE /api/tasks/{id}     # 删除任务
-GET    /api/tasks/stats    # 获取任务统计
-```
-
-### 数据模型
-```json
-{
-  "id": "uuid",
-  "title": "任务标题",
-  "description": "任务描述",
-  "priority": "high|medium|low",
-  "status": "pending|completed",
-  "created_at": "2024-01-01T00:00:00",
-  "completed_at": null,
-  "updated_at": "2024-01-01T00:00:00"
-}
-```
-
-### 数据持久化
-- 任务数据存储在`data/tasks.json`文件
-- 使用文件锁机制防止并发写入冲突
-- 定期备份数据文件到`data/backups/`目录
-
-## 安全设计
-- API请求使用CORS控制跨域访问
-- 输入验证和清理，防止XSS攻击
-- 使用HTTPS加密传输
-
-## 部署架构
-```
-用户 -> Nginx(443) -> Flask(57xxx) -> JSON文件
-         ↓
-     静态HTML文件
-```
-
-## 性能优化
-- 前端资源内联，减少HTTP请求
-- 任务列表使用虚拟滚动处理大量数据
-- API响应启用gzip压缩
-- 静态资源使用浏览器缓存
-
-## 错误处理
-- 前端使用try-catch捕获异常
-- 后端统一错误响应格式
-- 网络请求失败自动重试机制
-- 用户友好的错误提示
-
-## 可扩展性
-- 模块化代码结构，便于功能扩展
-- 预留用户认证接口
-- 支持数据导出/导入功能
-- 可集成第三方日历同步
+## 扩展
+可追加分类、提醒、导入导出、多用户鉴权。

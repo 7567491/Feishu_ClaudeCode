@@ -46,6 +46,7 @@ try {
 
 console.log('PORT from env:', process.env.PORT);
 
+import 'dotenv/config';
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import os from 'os';
@@ -74,6 +75,7 @@ import cliAuthRoutes from './routes/cli-auth.js';
 import userRoutes from './routes/user.js';
 import feishuRoutes from './routes/feishu.js';
 import feishuProxyRoutes from './routes/feishu-proxy.js';
+import codexProxyRoutes from './routes/feishu-codex-proxy.js';
 import adminRoutes from './routes/admin.js';
 import { initializeDatabase } from './database/db.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
@@ -331,6 +333,9 @@ app.use('/api/feishu', authenticateToken, feishuRoutes);
 
 // Feishu Proxy API (public - for bot-to-bot communication, optional API key auth)
 app.use('/api/feishu-proxy', feishuProxyRoutes);
+
+// Codex Proxy API (public - for bot-to-bot communication with Codex/小曼)
+app.use('/api/codex-proxy', codexProxyRoutes);
 
 // Feishu Webhook (public - no authentication, verified by Feishu signature)
 app.post('/webhook', createWebhookHandler());
@@ -1749,13 +1754,16 @@ function gracefulShutdown(signal) {
         });
     }
 
-    // Step 4: Abort active Claude sessions
+    // Step 4: Handle active Claude sessions
+    // 🔧 重要修复：服务重启时不再终止 Claude 会话
+    // 因为 Claude 进程是 detached 的，它们会成为孤儿进程继续运行
+    // 用户可以在新服务启动后通过 --resume 继续会话
     const activeClaude = getActiveClaudeSessions();
     if (activeClaude.length > 0) {
-        console.log(c.info(`[SHUTDOWN] Aborting ${activeClaude.length} Claude sessions...`));
-        activeClaude.forEach(sessionId => {
-            abortClaudeSession(sessionId);
-        });
+        console.log(c.info(`[SHUTDOWN] Orphaning ${activeClaude.length} Claude sessions (will continue independently)...`));
+        // 不再调用 abortClaudeSession，让进程自然运行完成
+        // 这些进程是 detached 的，服务重启后它们会变成孤儿进程由 init 接管
+        console.log(c.info(`[SHUTDOWN] Active session IDs: ${activeClaude.join(', ')}`));
     }
 
     // Step 5: Clean up PTY sessions

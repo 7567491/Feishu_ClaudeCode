@@ -180,3 +180,4 @@ pdf/
 .Test-unix/
 .XIM-unix/
 .font-unix/
+.EasyOCR/

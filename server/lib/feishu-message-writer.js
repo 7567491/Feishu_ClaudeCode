@@ -174,6 +174,17 @@ export class FeishuMessageWriter {
   }
 
   /**
+   * 兼容 Codex 文本流的简易写入接口
+   * @param {string|Buffer} chunk
+   */
+  write(chunk) {
+    if (chunk === undefined || chunk === null) return;
+    const text = chunk.toString ? chunk.toString() : String(chunk);
+    this.appendText(text);
+    this.flushIfNeeded();
+  }
+
+  /**
    * Check if we should flush the buffer
    */
   flushIfNeeded() {

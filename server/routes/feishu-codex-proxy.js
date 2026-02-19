@@ -4,19 +4,27 @@
  */
 
 import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { queryCodex } from '../codex-cli.js';
 import { FeishuClient } from '../lib/feishu-client.js';
 import { FeishuSessionManager } from '../lib/feishu-session.js';
 import { FeishuMessageWriter } from '../lib/feishu-message-writer.js';
+import { FeishuFileWatcher } from '../lib/feishu-file-watcher.js';
+import { FeishuFileHandler } from '../lib/feishu-file-handler.js';
 import { userDb, feishuDb } from '../database/db.js';
 import { truncatePrompt, SESSION_LIMITS } from '../lib/session-limits.js';
 import DataAccess from '../lib/feishu-shared/data-access.js';
 
 const router = express.Router();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 let feishuClient = null;
 let sessionManager = null;
 let userId = null;
+let fileWatcher = null;
 const busySessions = new Map();
 const BUSY_LOCK_TTL_MS = 15_000;
 
@@ -194,10 +202,21 @@ async function initializeCodexProxy() {
   // 4. 初始化会话管理器
   sessionManager = new FeishuSessionManager(userId, './feicc');
 
+  // 5. 初始化文件监控（默认关闭自动推送，仅供指令发送/转化）
+  const watchPath = path.resolve(__dirname, '..');
+  fileWatcher = new FeishuFileWatcher(watchPath, {
+    enabled: false,
+    sendAsDocument: true,
+    debounceDelay: 3000
+  });
+  fileWatcher.setClient(feishuClient);
+  fileWatcher.start();
+
   console.log('[CodexProxy] ✅ Initialized');
   console.log('[CodexProxy] 🆔 User ID:', userId);
   console.log('[CodexProxy] 🤖 App ID:', appId);
   console.log('[CodexProxy] 📁 Work dir: ./feicc');
+  console.log('[CodexProxy] 📄 File watcher ready:', watchPath);
 }
 
 /**
@@ -251,6 +270,69 @@ router.post('/query', async (req, res) => {
     };
 
     session = await sessionManager.getOrCreateSession(fakeEvent);
+
+    // 激活文件监控上下文（用于指令发送/转化）
+    if (fileWatcher) {
+      fileWatcher.setActiveChatId(chatId);
+    }
+
+    // 处理 markdown 转文档指令："转化 xx.md"
+    const convertCommand = FeishuFileHandler.parseConvertCommand(message);
+    if (convertCommand && convertCommand.command === 'convert') {
+      console.log('[CodexProxy] File convert command detected:', convertCommand.fileName);
+      try {
+        await FeishuFileHandler.handleFileConvert(
+          feishuClient,
+          chatId,
+          session.project_path,
+          convertCommand.fileName
+        );
+
+        DataAccess.logMessage(session.id, 'outgoing', 'file', `convert:${convertCommand.fileName}`, null);
+
+        return res.json({
+          success: true,
+          message: `File converted: ${convertCommand.fileName}`,
+          sessionId: session.id
+        });
+      } catch (error) {
+        console.error('[CodexProxy] Failed to convert file:', error.message);
+        await feishuClient.sendTextMessage(chatId, `❌ 转化失败: ${error.message}`);
+        return res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    }
+
+    // 处理文件发送指令："发送 xx.md"
+    const fileCommand = FeishuFileHandler.parseFileCommand(message);
+    if (fileCommand && fileCommand.command === 'send') {
+      console.log('[CodexProxy] File send command detected:', fileCommand.fileName);
+      try {
+        await FeishuFileHandler.handleFileSend(
+          feishuClient,
+          chatId,
+          session.project_path,
+          fileCommand.fileName
+        );
+
+        DataAccess.logMessage(session.id, 'outgoing', 'file', fileCommand.fileName, null);
+
+        return res.json({
+          success: true,
+          message: `File sent: ${fileCommand.fileName}`,
+          sessionId: session.id
+        });
+      } catch (error) {
+        console.error('[CodexProxy] Failed to send file:', error.message);
+        await feishuClient.sendTextMessage(chatId, `❌ 发送失败: ${error.message}`);
+        return res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    }
 
     // 4. 并发提示但不阻塞（Codex 允许并行，避免频繁 429）
     if (isSessionLocked(session.id)) {

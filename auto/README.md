@@ -86,6 +86,18 @@ node task-parser.cjs
 # 选择 [1] 启用自动化
 ```
 
+### Boundy Codex 任务（可选）
+
+```bash
+# 手动执行一次
+node boundy-runner.mjs
+
+# 配置每10分钟执行（选择 Boundy Codex）
+CRON_TARGET=boundy ./setup-cron.sh
+```
+
+状态文件保存在 `boundy-state.json`，暂停执行可创建 `.boundy-pause`。
+
 ## 📊 监控和控制
 
 ### 查看进度

@@ -2,7 +2,7 @@
  * 会话限制模块
  *
  * 功能：
- * 1. 定义会话消息数量上限（5条）
+ * 1. 定义会话消息数量上限（100条）
  * 2. 定义 prompt 长度上限（2000字符）
  * 3. 检测 "Prompt is too long" 错误并触发自动恢复
  *
@@ -14,7 +14,7 @@
  */
 export const SESSION_LIMITS = {
   /** 会话消息数量上限 */
-  MAX_MESSAGES: 5,
+  MAX_MESSAGES: 100,
 
   /** Prompt 长度上限（字符数） */
   MAX_PROMPT_LENGTH: 2000,
